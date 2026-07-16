@@ -9,7 +9,8 @@
     "db:seed": "tsx src/db/seed.ts",
     "dispatch:run": "tsx src/orchestration/runOnce.ts",
     "server:dev": "tsx watch src/server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "husky"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
+    "husky": "^9.1.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
