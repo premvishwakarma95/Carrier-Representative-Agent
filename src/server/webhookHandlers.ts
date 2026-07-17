@@ -8,9 +8,15 @@
  * loadId/carrierId/callAttemptId are never trusted from the LLM's tool-call
  * arguments (see comment in src/assistant/tools.ts) — they're resolved here
  * from the CallAttempt matching the webhook's vapiCallId instead.
+ *
+ * Quotes and do-not-call flags are written to MDR (src/mdr/api.ts — mock
+ * today, real once the client builds it), since those are the two write
+ * endpoints the client's API actually covers. Everything else (declines,
+ * callbacks, escalations) has no MDR equivalent and stays local only.
  */
-import { CallAttempt, Quote, Escalation, Carrier } from "../db/models/index.js";
+import { CallAttempt, Escalation } from "../db/models/index.js";
 import { checkStopConditions } from "../orchestration/stopConditions.js";
+import { submitQuote as submitQuoteToMdr, updateDoNotCall } from "../mdr/api.js";
 import type { HydratedDocument } from "mongoose";
 
 type ToolCall = { id: string; name: string; parameters: Record<string, any> };
@@ -68,11 +74,8 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     params.carrierConfirmedReadBack && params.baseRate != null && params.totalEstimatedAllIn != null
   );
 
-  const quote = await Quote.create({
-    loadId: attempt.loadId,
+  const quote = await submitQuoteToMdr(attempt.loadId, {
     carrierId: attempt.carrierId,
-    callAttemptId: attempt.id,
-    source: "call",
     serviceScope: params.serviceScope,
     baseRate: params.baseRate,
     fuelSurcharge: params.fuelSurcharge,
@@ -89,14 +92,13 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     isConditional: params.isConditional ?? false,
     conditionalOn: params.conditionalOn,
     carrierConfirmedReadBack: Boolean(params.carrierConfirmedReadBack),
-    status: isComplete ? "valid" : "pending_review",
   });
 
   attempt.callResult = params.isConditional ? "conditional_quote" : "quote_received";
   await attempt.save();
 
   if (isComplete) {
-    await checkStopConditions(attempt.loadId.toString());
+    await checkStopConditions(attempt.loadId);
   }
 
   return { ok: true, quoteId: quote.id, status: quote.status };
@@ -136,16 +138,9 @@ async function escalateToHuman(params: any, { attempt }: CallContext) {
 }
 
 async function recordDoNotCall(params: any, { attempt }: CallContext) {
-  await Carrier.updateOne(
-    { _id: attempt.carrierId },
-    {
-      $set: {
-        "doNotCall.calls": true,
-        "doNotCall.email": params.scope === "calls_and_email",
-        "doNotCall.recordedAt": new Date(),
-      },
-    }
-  );
+  await updateDoNotCall(attempt.carrierId, {
+    scope: params.scope === "calls_and_email" ? "calls_and_email" : "calls_only",
+  });
 
   attempt.callResult = "do_not_call";
   await attempt.save();
@@ -154,16 +149,13 @@ async function recordDoNotCall(params: any, { attempt }: CallContext) {
 }
 
 async function updateContact(params: any, { attempt }: CallContext) {
-  const update: Record<string, any> = {};
-  if (params.correctedName) update["contacts.0.name"] = params.correctedName;
-  if (params.correctedPhone) update["contacts.0.phone"] = params.correctedPhone;
-  if (params.correctedEmail) update["contacts.0.email"] = params.correctedEmail;
-  if (params.preference) update["preferences.notes"] = params.preference;
-
-  if (Object.keys(update).length > 0) {
-    await Carrier.updateOne({ _id: attempt.carrierId }, { $set: update });
-  }
-  return { ok: true };
+  // No MDR endpoint exists for this (not in the client's 7-endpoint spec) —
+  // logged only until the client confirms whether it's in scope.
+  console.warn(
+    `update_contact called for carrier ${attempt.carrierId} but no MDR write endpoint exists yet:`,
+    params
+  );
+  return { ok: true, note: "not yet persisted — no MDR endpoint for contact updates" };
 }
 
 export async function handleEndOfCallReport(message: any) {
@@ -185,5 +177,5 @@ export async function handleEndOfCallReport(message: any) {
   }
 
   await attempt.save();
-  await checkStopConditions(attempt.loadId.toString());
+  await checkStopConditions(attempt.loadId);
 }

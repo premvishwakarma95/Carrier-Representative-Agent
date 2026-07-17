@@ -2,8 +2,10 @@ import { Schema, model, Types } from "mongoose";
 
 const escalationSchema = new Schema(
   {
-    loadId: { type: Types.ObjectId, ref: "Load", required: true, index: true },
-    carrierId: { type: Types.ObjectId, ref: "Carrier", required: true, index: true },
+    // Plain strings — MDR's external ids, not local collections. See the
+    // same note in db/models/CallAttempt.ts.
+    loadId: { type: String, required: true, index: true },
+    carrierId: { type: String, required: true, index: true },
     callAttemptId: { type: Types.ObjectId, ref: "CallAttempt", required: true },
 
     reason: { type: String, required: true },

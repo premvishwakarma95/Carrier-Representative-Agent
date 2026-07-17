@@ -23,9 +23,19 @@ const assistantPayload = {
     messages: [{ role: "system", content: SYSTEM_PROMPT }],
     tools: TOOLS,
   },
+  // Vapi's native voice provider doesn't support a speed control at all —
+  // switched to ElevenLabs specifically to fix reported speaking-speed issues
+  // (PlayHT also supports speed, but isn't enabled on this account/plan —
+  // every PlayHT preset returned "Couldn't Find PlayHT Voice"). speed<1
+  // slows delivery; stability/similarityBoost raised for a more consistent,
+  // less erratic-sounding professional tone. voiceId is still a placeholder
+  // pending MDR's actual preference.
   voice: {
-    provider: "vapi",
-    voiceId: "Elliot", // placeholder — swap once MDR confirms Everly's voice preference
+    provider: "11labs",
+    voiceId: "sarah",
+    speed: 0.9,
+    stability: 0.6,
+    similarityBoost: 0.8,
   },
   transcriber: {
     provider: "deepgram",

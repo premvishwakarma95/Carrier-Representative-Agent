@@ -17,8 +17,8 @@ import { computeAttemptSchedule } from "./cadence.js";
 import { isWithinCallingWindow } from "./callingWindow.js";
 import { buildCallVariables } from "./callVariables.js";
 import { createOutboundCall } from "../vapi/calls.js";
-
-const MAX_ATTEMPT_NUMBER_DEFAULT = 4;
+import { getAccountSettings } from "../mdr/api.js";
+import type { MdrLoad, MdrCarrier, MdrAccountSettings } from "../mdr/api.js";
 
 export async function runDispatchCycle() {
   const loads = await findLoadsNeedingOutreach();
@@ -31,10 +31,11 @@ export async function runDispatchCycle() {
       continue;
     }
 
+    const settings = await getAccountSettings(load.accountId);
     const queue = await buildCarrierQueue(load);
 
     for (const carrier of queue) {
-      const outcome = await tryDialCarrier(load, carrier);
+      const outcome = await tryDialCarrier(load, carrier, settings);
       results.push({ loadId: load.id, carrierId: carrier.id, outcome });
 
       // Re-check after every attempt actually placed — not just at the end of
@@ -49,8 +50,8 @@ export async function runDispatchCycle() {
   return results;
 }
 
-async function tryDialCarrier(load: any, carrier: any): Promise<string> {
-  const maxAttempts = load.maxCallAttempts ?? MAX_ATTEMPT_NUMBER_DEFAULT;
+async function tryDialCarrier(load: MdrLoad, carrier: MdrCarrier, settings: MdrAccountSettings): Promise<string> {
+  const maxAttempts = settings.maxCallAttempts;
 
   const existingAttempts = await CallAttempt.find({ loadId: load.id, carrierId: carrier.id }).sort({
     attemptNumber: 1,
@@ -61,12 +62,16 @@ async function tryDialCarrier(load: any, carrier: any): Promise<string> {
     return "skipped: max attempts reached";
   }
 
+  if (!load.timing.bidEmailSentAt) {
+    return "skipped: no bid-email-sent timestamp on load (GAP-FILL field missing)";
+  }
+
   const lastAttempt = existingAttempts[existingAttempts.length - 1];
   const scheduledFor = computeAttemptSchedule({
     attemptNumber: nextAttemptNumber,
     timezone: carrier.timezone,
-    emailSentAt: load.createdAt,
-    emailWaitMinutes: load.emailWaitMinutes,
+    emailSentAt: new Date(load.timing.bidEmailSentAt as string),
+    emailWaitMinutes: settings.emailWaitMinutes,
     previousAttemptAt: lastAttempt?.startedAt ?? lastAttempt?.createdAt,
   });
 

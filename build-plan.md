@@ -102,7 +102,7 @@ Each phase's steps keep their original numbering (Step 1, Step 2, ...) for cross
 
 **Step 5 — End-to-end test against mock data** ✅ done
 5.1. ✅ Verified the full loop live: dialed a real (fictional-number) test call via Vapi, received the `submit_quote` tool-call webhook, wrote a valid `Quote`, then verified `end-of-call-report` correctly filled in transcript/recording/summary
-5.2. ✅ Verified idempotency (immediate re-run created zero duplicate attempts) and the threshold→stop transition (adding quotes up to the threshold correctly flips `Load.status` to `threshold_met`)
+5.2. ✅ Verified idempotency (immediate re-run created zero duplicate attempts) and the threshold→stop transition (adding quotes up to the threshold correctly flips the quote-status endpoint's `allowCalling` to `false`)
 
 **Step 7 — Guardrails & escalation** 🔵 mostly done
 7.1. ✅ Incomplete/unconfirmed `submit_quote` calls are marked `pending_review` instead of auto-valid
@@ -112,11 +112,11 @@ Each phase's steps keep their original numbering (Step 1, Step 2, ...) for cross
 ### Phase 2 — MDR Integration
 **Goal**: Swap mock data for MDR's real system. **Blocked by**: MDR API docs/credentials delivered. **Done when**: a real load flows through and a quote writes back successfully in staging.
 
-**Step 6 — Integrate the real MDR API**
-6.1. Get API docs and credentials from MDR.
-6.2. Build the MDR read client (loads, carriers, email-response status).
-6.3. Build the MDR write-back client (quote submission + do-not-call sync, per the narrowed scope in [requirements-tracker.md](requirements-tracker.md)).
-6.4. Swap the mock data layer for the real integration in staging.
+**Step 6 — Integrate the real MDR API** 🔵 built against a mock of the client's own proposed spec, not the real API yet
+6.1. ⏸ Get final API docs and credentials from MDR — client sent `Everly_MDR_API_Workload_Timeline_Estimation.pdf` (their own proposed 7-endpoint spec, ~12-15 dev days on their side); we sent back clarifying questions (see [requirements-tracker.md](requirements-tracker.md)), call pending.
+6.2. ✅ (against the mock) Built the MDR read client — `src/mdr/api.ts`/`client.ts` — covering all 7 proposed endpoints, plus a mock-only mock service (`src/mock-mdr-api/`) implementing them with fake data so orchestration could be built and verified without waiting on the client.
+6.3. ✅ (against the mock) Build the MDR write-back client — `submit_quote` and `record_do_not_call` in `webhookHandlers.ts` now POST/PATCH through `src/mdr/api.ts`, per the narrowed scope in [requirements-tracker.md](requirements-tracker.md).
+6.4. ✅ (against the mock) Swapped the mock data layer — `eligibility.ts`, `queueBuilder.ts`, `callVariables.ts`, `stopConditions.ts`, `dispatcher.ts` all read through `src/mdr/api.ts` now, not local Mongoose `Load`/`Carrier`/`Quote` models (removed). Swapping to the real API once the client delivers it is a `MDR_API_BASE_URL`/`MDR_API_KEY` env change only. **Remaining before this step is truly done**: the mock's `invitedCarrierIds` and `bidEmailSentAt` fields are GAP-FILL guesses (see `src/mock-mdr-api/README.md`) for gaps in the client's spec that are still pending their answer — reconcile field shapes once confirmed.
 
 ### Phase 3 — Configuration & Compliance Lock-In
 **Goal**: Every open business/legal decision finalized. **Blocked by**: Frank + MDR legal. **Done when**: no config placeholders left; legal has signed off, **including TCPA consent basis for AI-voice calls to carrier numbers**.

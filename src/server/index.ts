@@ -3,7 +3,11 @@ import { connectDB } from "../db/connection.js";
 import { handleToolCalls, handleEndOfCallReport } from "./webhookHandlers.js";
 
 const app = express();
-app.use(express.json());
+// Express's default body limit is 100kb — Vapi's webhook payloads carry the
+// full conversation history (and, for end-of-call-report, the full artifact
+// incl. transcript), which routinely exceeds that on longer calls and was
+// being silently rejected with a 413 before ever reaching our handlers.
+app.use(express.json({ limit: "10mb" }));
 
 app.post("/vapi/tool-calls", async (req, res) => {
   const message = req.body.message;
@@ -11,7 +15,15 @@ app.post("/vapi/tool-calls", async (req, res) => {
   try {
     if (message?.type === "tool-calls") {
       const vapiCallId = message.call?.id;
-      const results = await handleToolCalls(message.toolCallList ?? [], vapiCallId);
+      // Vapi's real toolCallList items are {id, type, function: {name, arguments}}
+      // with arguments as a JSON string — not the flat {id, name, parameters}
+      // shape handleToolCalls expects, so map/parse here.
+      const toolCallList = (message.toolCallList ?? []).map((call: any) => ({
+        id: call.id,
+        name: call.function?.name,
+        parameters: call.function?.arguments ? JSON.parse(call.function.arguments) : {},
+      }));
+      const results = await handleToolCalls(toolCallList, vapiCallId);
       res.json({ results });
       return;
     }

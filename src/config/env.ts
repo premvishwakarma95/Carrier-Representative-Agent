@@ -11,4 +11,5 @@ function required(name: string): string {
 export const env = {
   vapiApiKey: required("VAPI_API_KEY"),
   vapiPhoneNumberId: process.env.VAPI_PHONE_NUMBER_ID,
+  mdrAccountId: process.env.MDR_ACCOUNT_ID ?? "mock-account-1",
 };

@@ -3,61 +3,48 @@
  * closed, user paused/cancelled, carrier pool exhausted, or compliance issue.
  * Re-run after every completed call — not just at the end of a batch — so we
  * never keep calling a load that just got covered.
+ *
+ * Load status and quote counts are MDR's canonical data now (see src/mdr/) —
+ * this only reads, it never writes load.status back, since MDR owns that.
  */
-import { Load, Quote, Carrier } from "../db/models/index.js";
-import { Types } from "mongoose";
-
-export async function countValidQuotes(loadId: Types.ObjectId | string): Promise<number> {
-  return Quote.countDocuments({ loadId, status: "valid" });
-}
+import { getLoad, getLoadQuoteStatus } from "../mdr/api.js";
+import { buildCarrierQueue } from "./queueBuilder.js";
 
 export type StopCheckResult = {
   shouldStop: boolean;
   reason?: "threshold_met" | "bid_closed" | "awarded" | "paused" | "cancelled" | "pool_exhausted";
 };
 
-/**
- * Re-evaluates a load's stop conditions and updates its status if needed.
- * Returns whether outreach should stop (and why) so the caller can decide
- * whether to cancel/skip any further dispatch for this load.
- */
-export async function checkStopConditions(loadId: Types.ObjectId | string): Promise<StopCheckResult> {
-  const load = await Load.findById(loadId);
-  if (!load) throw new Error(`Load not found: ${loadId}`);
+const TERMINAL_REASONS: Record<string, StopCheckResult["reason"]> = {
+  awarded: "awarded",
+  paused: "paused",
+  cancelled: "cancelled",
+  closed: "bid_closed",
+};
 
-  // Terminal states already set by a human/external action.
-  if (["awarded", "paused", "cancelled"].includes(load.status)) {
-    return { shouldStop: true, reason: load.status as StopCheckResult["reason"] };
+export async function checkStopConditions(loadId: string): Promise<StopCheckResult> {
+  const load = await getLoad(loadId);
+
+  const terminalReason = TERMINAL_REASONS[load.status];
+  if (terminalReason) {
+    return { shouldStop: true, reason: terminalReason };
   }
 
-  if (load.bidCloseAt && load.bidCloseAt.getTime() <= Date.now()) {
-    if (load.status !== "closed") {
-      load.status = "closed";
-      await load.save();
-    }
+  if (load.bidCloseAt && new Date(load.bidCloseAt).getTime() <= Date.now()) {
     return { shouldStop: true, reason: "bid_closed" };
   }
 
-  const validQuoteCount = await countValidQuotes(load.id);
-  if (validQuoteCount >= load.quoteThreshold) {
-    if (load.status !== "threshold_met") {
-      load.status = "threshold_met";
-      await load.save();
-    }
+  const quoteStatus = await getLoadQuoteStatus(load.id);
+  if (quoteStatus.remainingQuoteCount <= 0) {
     return { shouldStop: true, reason: "threshold_met" };
   }
 
-  const eligibleRemaining = await hasEligibleCarriersRemaining(load.id);
-  if (!eligibleRemaining) {
+  // Full filter/rank pass, not just a proxy check — a carrier who's DNC'd but
+  // still the only "invited" candidate should count as pool-exhausted too.
+  const queue = await buildCarrierQueue(load);
+  if (queue.length === 0) {
     return { shouldStop: true, reason: "pool_exhausted" };
   }
 
   return { shouldStop: false };
-}
-
-async function hasEligibleCarriersRemaining(loadId: Types.ObjectId | string): Promise<boolean> {
-  // Cheap existence check — the queue builder does the full filter/rank pass;
-  // this just answers "is it even worth building the queue."
-  const carrierCount = await Carrier.countDocuments({ "doNotCall.calls": { $ne: true } });
-  return carrierCount > 0;
 }

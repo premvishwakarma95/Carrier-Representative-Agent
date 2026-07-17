@@ -1,9 +1,12 @@
-import { Schema, model, Types } from "mongoose";
+import { Schema, model } from "mongoose";
 
 const callAttemptSchema = new Schema(
   {
-    loadId: { type: Types.ObjectId, ref: "Load", required: true, index: true },
-    carrierId: { type: Types.ObjectId, ref: "Carrier", required: true, index: true },
+    // Plain strings, not ObjectId refs — loadId/carrierId are MDR's external
+    // ids (see src/mdr/api.ts), not local collections. Load/Carrier data now
+    // lives in MDR's system (mock today, real once the client builds it).
+    loadId: { type: String, required: true, index: true },
+    carrierId: { type: String, required: true, index: true },
     attemptNumber: { type: Number, required: true }, // 1-4 per the confirmed cadence
 
     scheduledFor: { type: Date, required: true }, // when this attempt should fire, per cadence rules

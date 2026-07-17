@@ -3,39 +3,46 @@
  * ranking" (soft ordering — lane/equipment match, service history, proximity,
  * capacity, responsiveness, compliance; explicitly NOT ranked by cheapest
  * historical rate, since we don't have pricing before calling anyway).
+ *
+ * Candidate pool starts from load.invitedCarrierIds (GAP-FILL — not in the
+ * client's PDF spec, see src/mock-mdr-api/README.md) rather than the general
+ * carrier eligibility directory, so we only ever call carriers MDR actually
+ * invited to bid on this load.
  */
-import { Carrier, Quote } from "../db/models/index.js";
-import type { HydratedDocument } from "mongoose";
+import { getCarriers, getLoadQuotes } from "../mdr/api.js";
+import type { MdrLoad, MdrCarrier } from "../mdr/api.js";
 
-// Loosely typed on purpose — callers pass hydrated Mongoose Load documents,
-// whose generated types are noisier than useful for this internal helper.
-type LoadDoc = any;
+export async function buildCarrierQueue(load: MdrLoad): Promise<MdrCarrier[]> {
+  const [invitedCarriers, quotes] = await Promise.all([
+    getCarriers(load.invitedCarrierIds),
+    getLoadQuotes(load.id),
+  ]);
 
-export async function buildCarrierQueue(load: LoadDoc) {
-  const alreadyQuotedCarrierIds = await Quote.find({ loadId: load.id, status: "valid" }).distinct(
-    "carrierId"
+  const alreadyQuotedCarrierIds = new Set(
+    quotes.filter((q) => q.status === "valid").map((q) => q.carrierId)
   );
 
-  const eligible = await Carrier.find({
-    _id: { $nin: alreadyQuotedCarrierIds },
-    "doNotCall.calls": { $ne: true },
-    "eligibility.approvedAuthority": true,
-    "eligibility.approvedInsurance": true,
-    "eligibility.fraudFlag": { $ne: true },
-    "eligibility.safetyStatus": { $ne: "flagged" },
-  });
+  const eligible = invitedCarriers.filter(
+    (carrier) =>
+      !alreadyQuotedCarrierIds.has(carrier.id) &&
+      !carrier.doNotCall.calls &&
+      carrier.eligibility.approvedAuthority &&
+      carrier.eligibility.approvedInsurance &&
+      !carrier.eligibility.fraudFlag &&
+      carrier.eligibility.safetyStatus !== "flagged"
+  );
 
   return rankCarriers(eligible, load);
 }
 
-function rankCarriers(carriers: HydratedDocument<any>[], load: LoadDoc) {
+function rankCarriers(carriers: MdrCarrier[], load: MdrLoad): MdrCarrier[] {
   return carriers
     .map((carrier) => ({ carrier, score: scoreCarrier(carrier, load) }))
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.carrier);
 }
 
-function scoreCarrier(carrier: HydratedDocument<any>, load: LoadDoc): number {
+function scoreCarrier(carrier: MdrCarrier, load: MdrLoad): number {
   let score = 0;
 
   const equipmentTag = [load.equipment.containerSize, load.equipment.containerType]
@@ -47,7 +54,7 @@ function scoreCarrier(carrier: HydratedDocument<any>, load: LoadDoc): number {
 
   if (
     load.routing.deliveryState &&
-    carrier.eligibility.approvedGeography?.includes(load.routing.deliveryState)
+    carrier.eligibility.approvedGeography?.includes(load.routing.deliveryState as string)
   ) {
     score += 5;
   }

@@ -229,4 +229,10 @@ export const TOOLS = [
     },
     server: { url: ORCHESTRATION_WEBHOOK_URL },
   },
+  // Vapi's built-in call-termination tool — no server URL, handled natively.
+  // Without this, Everly has no reliable way to hang up after her closing
+  // line; a live test call had to be ended by the carrier manually (see
+  // test-cases.md notes) because endCallPhrases matching against her
+  // paraphrased (non-verbatim) sign-off never fired.
+  { type: "endCall" as const },
 ];

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "assistant:create": "tsx src/assistant/create.ts",
-    "db:seed": "tsx src/db/seed.ts",
+    "db:reset": "tsx src/db/reset.ts",
+    "mock-mdr:dev": "tsx watch src/mock-mdr-api/server.ts",
     "dispatch:run": "tsx src/orchestration/runOnce.ts",
     "server:dev": "tsx watch src/server/index.ts",
     "typecheck": "tsc --noEmit",
