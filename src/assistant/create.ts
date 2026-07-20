@@ -44,6 +44,10 @@ const assistantPayload = {
   },
   endCallMessage:
     "Thank you for your time today. Have a great rest of your day.",
+  // Vapi's default is 600s (10 min) — too short for a real carrier-pricing
+  // conversation with multiple accessorials/edge cases; a live test call was
+  // force-ended by the platform mid-conversation before quote submission.
+  maxDurationSeconds: 900,
   endCallPhrases: ["goodbye", "talk to you soon"],
   // Explicit per client requirement ("record all calls where legally
   // permitted, store recordings/transcripts/summaries") — set explicitly
