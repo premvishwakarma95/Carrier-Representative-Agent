@@ -4,15 +4,20 @@ Internal build reference (merged from the former technical-architecture.md + bui
 
 ## End-to-end flow
 
-1. Load posted in MDR → MDR's existing system emails the bid invite to eligible carriers.
-2. Our **orchestration service** watches for loads where the email-wait window has passed and the valid-quote count is still below the required threshold.
-3. For each such load, it builds an **eligible-carrier call queue**: excludes carriers who already quoted (by email or prior call), applies eligibility rules (authority, insurance, equipment, geography, DNC list), ranks by lane/equipment match and service history, and respects each carrier's max-attempt limit.
-4. For each eligible carrier (respecting the configured calling window and carrier time zone), the service triggers a **Vapi outbound call**, passing that load's specific details in as call variables.
-5. The **Vapi assistant (Everly)** runs the scripted conversation and calls **function tools** in real time to record what's happening (quote captured, decline reason, callback requested, escalation needed).
-6. Vapi sends **webhook events** back to our orchestration service (call started, tool invoked, call ended, transcript ready).
-7. The orchestration service validates the result, stores it, and writes it into **MDR** via the write-back API.
-8. After every completed call, the service **re-checks stop conditions** for that load (threshold met? bid closed?) — if met, it cancels any remaining queued calls for that load.
-9. If a call triggers a guardrail condition, the assistant either does a **live warm transfer** to a human or falls back to `schedule_callback`.
+_Updated 2026-07-23 to match the current push-webhook architecture — see `src/mock-mdr-api/`, `src/mdr-simulator-ui/`, and `CLAUDE.md`'s Architecture section for the code this describes._
+
+1. **Mock MDR API** (`src/mock-mdr-api/`) stands in for MDR's real system until the client builds theirs, exposing the same 4 endpoints MDR has confirmed plus a few extra dev-only routes.
+2. **Simulator UI** (`src/mdr-simulator-ui/`, served at `/simulator`) stands in for MDR's actual system: fills in a load, its invited carriers, and account settings, then fires that payload at Everly's own webhook — the same way MDR will once their integration is live.
+3. **Webhook intake** (`src/server/mdrWebhook.ts`) receives that payload and stores the load locally, since MDR's confirmed API has no `GET /loads` to re-fetch from later. Full carrier profiles (contacts, eligibility, quoted status) are not cached locally — they're fetched fresh from the MDR API whenever needed, since that data can change carrier-side at any time.
+4. **Scheduler** (`npm run dispatch:run`, `src/orchestration/dispatcher.ts`), run repeatedly, for every locally-open load:
+   - Re-checks whether the load should stop being worked at all (enough quotes already in, bid closed, MDR closed it for another reason, or no eligible carriers left) — `stopConditions.ts`.
+   - Builds the eligible-carrier queue — excludes anyone already quoted, opted out, or failing MDR's eligibility checks, and ranks the rest — `queueBuilder.ts`.
+   - For each eligible carrier, checks whether their next attempt is actually due right now per the confirmed cadence (1st call after the email-wait window, 2nd +1hr, 3rd +2hr, 4th next business morning) and within their local calling window — `cadence.ts` / `callingWindow.ts`.
+5. **Placing the call** — when due, the **Vapi assistant (Everly)** dials the carrier and runs the scripted conversation, calling function tools in real time as the conversation produces structured data (quote captured, decline reason, callback requested, escalation needed).
+6. Vapi sends **webhook events** back (`src/server/webhookHandlers.ts`): mid-call tool calls, and the end-of-call report (transcript, recording, summary).
+7. A submitted quote is written to **both** MDR (source of truth, via the write-back API) and a local `Quote` audit copy (`src/db/models/Quote.ts`) — the local copy is written first, so a failed MDR write still leaves proof of what was captured.
+8. Stop conditions are re-checked after **every single call**, not just at the end of a batch — this is what stops the scheduler from over-calling a load once it's covered.
+9. If a call hits a guardrail condition (negotiation, legal/compliance question, unclear terminal rules, aggressive caller, tool failure, direct request for a human), the assistant uses `escalate_to_human` to log it and collect a callback time — there is no live transfer capability in this system.
 
 Full diagram: [call-flow.md](call-flow.md).
 
