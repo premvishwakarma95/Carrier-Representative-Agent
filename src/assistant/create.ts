@@ -72,7 +72,19 @@ const assistantPayload = {
   // conversation with multiple accessorials/edge cases; a live test call was
   // force-ended by the platform mid-conversation before quote submission.
   maxDurationSeconds: 900,
-  endCallPhrases: ["goodbye", "talk to you soon"],
+  // Removed endCallPhrases (2026-07-25) — the prompt already has Everly give
+  // her own natural sign-off before calling the endCall tool, which reliably
+  // fires on every reviewed call. Having "goodbye" also configured as an
+  // auto-hangup trigger phrase raced against endCallMessage above: the
+  // moment Everly's own sign-off naturally included a word like "goodbye",
+  // Vapi's phrase-detection hung up immediately, cutting endCallMessage off
+  // mid-word ("...Have" then dead) instead of letting it finish. The
+  // explicit endCall tool call is the reliable mechanism; this was a
+  // redundant, actively harmful safety net. Explicitly set to [] rather than
+  // omitted — Vapi's PATCH only updates fields present in the payload, so
+  // omitting this would have silently left the old value in place (verified
+  // this the hard way: the first attempt at this fix didn't actually clear it).
+  endCallPhrases: [],
   // Explicit per client requirement ("record all calls where legally
   // permitted, store recordings/transcripts/summaries") — set explicitly
   // rather than relying on Vapi's account-level default.
