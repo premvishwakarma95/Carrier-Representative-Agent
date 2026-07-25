@@ -27,20 +27,32 @@ const assistantPayload = {
   // switched to ElevenLabs specifically to fix reported speaking-speed issues
   // (PlayHT also supports speed, but isn't enabled on this account/plan —
   // every PlayHT preset returned "Couldn't Find PlayHT Voice"). speed<1
-  // slows delivery; stability/similarityBoost raised for a more consistent,
-  // less erratic-sounding professional tone. voiceId is still a placeholder
-  // pending MDR's actual preference.
+  // slows delivery. stability was previously raised to 0.6 to fix an
+  // "erratic" complaint, but that overcorrected into flat/robotic-sounding
+  // delivery (2026-07-25 client feedback) — lowered back down for more
+  // natural expressiveness. voiceId is still a placeholder pending MDR's
+  // actual preference.
   voice: {
     provider: "11labs",
     voiceId: "sarah",
     speed: 0.9,
-    stability: 0.6,
+    stability: 0.4,
     similarityBoost: 0.8,
   },
   transcriber: {
     provider: "deepgram",
     model: "nova-3",
     language: "en",
+  },
+  // Default endpointing was cutting the carrier off mid-sentence — a real
+  // call showed numAssistantInterrupted: 6 in Vapi's own performance
+  // metrics, which also explains garbled/stitched-together assistant
+  // responses seen in transcripts. Vapi's smart endpointing (model-based,
+  // not just silence-duration) plus a slightly longer wait reduces
+  // premature barge-ins at the cost of a bit more turn latency.
+  startSpeakingPlan: {
+    waitSeconds: 0.8,
+    smartEndpointingPlan: { provider: "vapi" },
   },
   endCallMessage:
     "Thank you for your time today. Have a great rest of your day.",
