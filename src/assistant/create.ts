@@ -35,6 +35,7 @@ const assistantPayload = {
   voice: {
     provider: "11labs",
     voiceId: "sarah",
+    model: "eleven_turbo_v2_5", // lower-latency ElevenLabs model — turn latency was ~2-2.5s, voice was one of the bigger contributors
     speed: 0.9,
     stability: 0.4,
     similarityBoost: 0.8,
