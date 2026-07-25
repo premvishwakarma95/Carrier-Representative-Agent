@@ -30,11 +30,13 @@ const assistantPayload = {
   // slows delivery. stability was previously raised to 0.6 to fix an
   // "erratic" complaint, but that overcorrected into flat/robotic-sounding
   // delivery (2026-07-25 client feedback) — lowered back down for more
-  // natural expressiveness. voiceId is still a placeholder pending MDR's
-  // actual preference.
+  // natural expressiveness. voiceId is the client-requested "Lisa" voice
+  // (2026-07-25), an ElevenLabs voice ID provided directly by the client/user —
+  // not in Vapi's curated voice-library browse list, which only surfaces a
+  // fixed preset subset, not ElevenLabs' full catalog.
   voice: {
     provider: "11labs",
-    voiceId: "sarah",
+    voiceId: "lRS76KmLyt8TypvcyLlV",
     model: "eleven_turbo_v2_5", // lower-latency ElevenLabs model — turn latency was ~2-2.5s, voice was one of the bigger contributors
     speed: 0.9,
     stability: 0.4,
