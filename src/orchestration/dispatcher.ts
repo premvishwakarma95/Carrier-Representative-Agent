@@ -9,7 +9,7 @@
  * which we treat as "someone else already claimed it" rather than an error.
  */
 import { env } from "../config/env.js";
-import { CallAttempt } from "../db/models/index.js";
+import { CallAttempt, Load } from "../db/models/index.js";
 import { findLoadsNeedingOutreach } from "./eligibility.js";
 import { buildCarrierQueue } from "./queueBuilder.js";
 import { checkStopConditions } from "./stopConditions.js";
@@ -17,10 +17,17 @@ import { computeAttemptSchedule } from "./cadence.js";
 import { isWithinCallingWindow } from "./callingWindow.js";
 import { buildCallVariables } from "./callVariables.js";
 import { createOutboundCall } from "../vapi/calls.js";
-import { getAccountSettings } from "../mdr/api.js";
-import type { MdrLoad, MdrCarrier, MdrAccountSettings } from "../mdr/api.js";
+import { getLoadQuoteStatus, getCarrierForLoad } from "../mdr/api.js";
+import { reconcileStuckCallAttempts } from "./reconcile.js";
+import type { MdrCarrierForLoad } from "../mdr/api.js";
+import type { LocalLoad } from "../db/models/Load.js";
 
 export async function runDispatchCycle() {
+  const reconciledCount = await reconcileStuckCallAttempts();
+  if (reconciledCount > 0) {
+    console.log(`Reconciled ${reconciledCount} stuck call attempt(s) directly from Vapi.`);
+  }
+
   const loads = await findLoadsNeedingOutreach();
   const results: Array<{ loadId: string; carrierId: string; outcome: string }> = [];
 
@@ -31,11 +38,10 @@ export async function runDispatchCycle() {
       continue;
     }
 
-    const settings = await getAccountSettings(load.accountId);
     const queue = await buildCarrierQueue(load);
 
     for (const carrier of queue) {
-      const outcome = await tryDialCarrier(load, carrier, settings);
+      const outcome = await tryDialCarrier(load, carrier);
       results.push({ loadId: load.id, carrierId: carrier.id, outcome });
 
       // Re-check after every attempt actually placed — not just at the end of
@@ -50,8 +56,8 @@ export async function runDispatchCycle() {
   return results;
 }
 
-async function tryDialCarrier(load: MdrLoad, carrier: MdrCarrier, settings: MdrAccountSettings): Promise<string> {
-  const maxAttempts = settings.maxCallAttempts;
+async function tryDialCarrier(load: LocalLoad, carrier: MdrCarrierForLoad): Promise<string> {
+  const maxAttempts = load.settings.maxCallAttempts;
 
   const existingAttempts = await CallAttempt.find({ loadId: load.id, carrierId: carrier.id }).sort({
     attemptNumber: 1,
@@ -62,16 +68,11 @@ async function tryDialCarrier(load: MdrLoad, carrier: MdrCarrier, settings: MdrA
     return "skipped: max attempts reached";
   }
 
-  if (!load.timing.bidEmailSentAt) {
-    return "skipped: no bid-email-sent timestamp on load (GAP-FILL field missing)";
-  }
-
   const lastAttempt = existingAttempts[existingAttempts.length - 1];
   const scheduledFor = computeAttemptSchedule({
     attemptNumber: nextAttemptNumber,
     timezone: carrier.timezone,
-    emailSentAt: new Date(load.timing.bidEmailSentAt as string),
-    emailWaitMinutes: settings.emailWaitMinutes,
+    webhookReceivedAt: new Date(load.receivedAt),
     previousAttemptAt: lastAttempt?.startedAt ?? lastAttempt?.createdAt,
   });
 
@@ -91,6 +92,21 @@ async function tryDialCarrier(load: MdrLoad, carrier: MdrCarrier, settings: MdrA
   const primaryContact = carrier.contacts?.[0];
   if (!primaryContact?.phone) {
     return "skipped: no phone number on file for carrier";
+  }
+
+  // Fresh, right-before-dialing checks — the queue was built earlier in this
+  // cycle (or on a prior cycle, for later cadence attempts), so both the
+  // load's status and this carrier's do-not-call flag could have changed
+  // since. Re-verify with live data rather than trusting the stale queue.
+  const freshQuoteStatus = await getLoadQuoteStatus(load.id);
+  if (!freshQuoteStatus.allowCalling) {
+    await Load.updateOne({ id: load.id }, { status: "closed" });
+    return "skipped: load closed since queue was built";
+  }
+
+  const freshCarrier = await getCarrierForLoad(carrier.id, load.id);
+  if (freshCarrier.doNotCall.calls) {
+    return "skipped: carrier opted out since queue was built";
   }
 
   let attempt;

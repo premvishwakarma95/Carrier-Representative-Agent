@@ -33,6 +33,20 @@ Note: the confirmed attempt cadence calls the same carrier up to 3 times in one 
 ### Process validation
 Frank's message included his own step-by-step description of the flow (load posted → bid emails → wait window → quote count check → AI carrier selection → AI call → quote capture → save to MDR → continue until stop condition). This matches [call-flow.md](call-flow.md) exactly — confirms our understanding and the client's mental model are aligned.
 
+### Integration architecture (confirmed 2026-07-20 client call)
+
+Supersedes the earlier "MDR API list" section below where they conflict — this is the actual confirmed design, not a wishlist.
+
+- **Push, not pull.** MDR calls **our** webhook ~30 minutes after a carrier invitation email goes out (the email-wait window has already elapsed by the time it fires). Payload: load details, invited carriers (id + do-not-call status only), account settings (quote threshold, email wait time, max call attempts, calling window, voicemail policy, disclosure policy, negotiation authority), and current quote-status numbers. Implemented at `POST /webhooks/mdr/load-ready` (`src/server/mdrWebhook.ts`).
+- **Only 4 endpoints confirmed to exist** on MDR's side — no load-discovery or bare carrier-lookup endpoint:
+  1. `GET /api/everly/loads/{load_id}/quote-status` — threshold, current valid count, remaining count, allow/stop flag
+  2. `GET /api/everly/carriers/{carrier_id}/{load_id}` — carrier profile (name, phone, email, MC/USDOT, insurance, eligibility, do-not-call, lanes, equipment, service history) **plus** whether that carrier has already quoted this specific load
+  3. `POST /api/everly/loads/{load_id}/quotes` — submit a confirmed quote
+  4. `PATCH /api/everly/carriers/{carrier_id}/do-not-call` — do-not-call flag, reason, source, timestamp, updated-by
+- **No `GET /loads`/`GET /loads/{id}`** — load details only ever arrive via the webhook, confirmed explicitly. We persist them locally (`src/db/models/Load.ts`) since there's nothing to re-fetch from later.
+- **Settings refresh**: Frank confirmed MDR **will** provide an API to refresh settings/load info if they change mid-outreach, but gave no shape/timeline yet — treat the webhook's initial settings payload as authoritative for a load's lifecycle until that API is specified. Don't build against a guessed shape.
+- Since MDR hasn't built any of this yet, `src/mock-mdr-api/` implements the 4 confirmed endpoints for real, and `src/mdr-simulator-ui/` (a page served at `/simulator`) stands in for MDR's system, manually firing the load-ready webhook.
+
 ## Prerequisites checklist, by build step
 
 ### Blocking now — before Step 1
@@ -47,10 +61,11 @@ Frank's message included his own step-by-step description of the flow (load post
 - [ ] Exact approved AI-disclosure and call-recording consent wording
 
 ### Before Step 6 (real MDR integration)
-- [ ] MDR API documentation
+- [x] Confirmation of what MDR's API can read/write — see "Integration architecture" above (4 endpoints + push webhook, confirmed 2026-07-20)
+- [ ] Shape/timeline for MDR's promised settings/load "refresh" API
 - [ ] Sandbox/staging credentials
 - [ ] Technical point of contact
-- [ ] Confirmation of what MDR's API can read/write — see the detailed API list below
+- [ ] Actual webhook delivery details from MDR's side (signing secret, retry/timeout behavior, what happens if we're down when they push)
 
 ### MDR API list — to hand to their technical contact
 
@@ -116,7 +131,8 @@ Frank's message included his own step-by-step description of the flow (load post
 9. Does Everly have any negotiation flexibility, or does she only ever record whatever rate the carrier states?
 10. Should every AI-collected quote go through human review before it's finalized in MDR, or only exceptions/low-confidence ones? What's the confidence bar for auto-submitting?
 11. Who should be notified when a quote comes in, a carrier declines, or an escalation happens — and how often?
-12. Can we get MDR API documentation, sandbox/staging credentials, and a technical point of contact?
+12. ~~Can we get MDR API documentation~~ — answered 2026-07-20 (see "Integration architecture" above). Still need: sandbox/staging credentials, technical point of contact, and the settings/load refresh API's shape.
+12b. What's the retry/timeout behavior on MDR's side if our webhook endpoint is briefly down when they try to push a load-ready event? Do they resend, or is that load's outreach just missed?
 13. Can you provide a handful of real or test carrier contacts for a staging test round?
 14. Who will review sample call transcripts/recordings and give sign-off before go-live?
 15. Is there a target go-live date or a specific load volume that should shape build priority?

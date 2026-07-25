@@ -6,8 +6,8 @@
  * is "what's the local weekday/hour in this IANA timezone right now."
  */
 
-const CALLING_WINDOW_START_HOUR = 8; // 8:00 AM
-const CALLING_WINDOW_END_HOUR = 17; // 5:00 PM
+const CALLING_WINDOW_START_HOUR = 10; // TEMP-TEST: revert to 8 (confirmed client value) after testing
+const CALLING_WINDOW_END_HOUR = 20; // TEMP-TEST: revert to 17 (confirmed client value) after testing
 const BUSINESS_DAYS = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
 
 function localParts(date: Date, timezone: string) {
@@ -29,9 +29,11 @@ function localParts(date: Date, timezone: string) {
 }
 
 export function isWithinCallingWindow(timezone: string, at: Date = new Date()): boolean {
-  const { weekday, hour } = localParts(at, timezone);
-  if (!BUSINESS_DAYS.has(weekday)) return false;
-  return hour >= CALLING_WINDOW_START_HOUR && hour < CALLING_WINDOW_END_HOUR;
+  return true; // TEMP-TEST: allow all days/times while testing — revert to the real check below after testing
+  // Real check (restore when reverting):
+  // const { weekday, hour } = localParts(at, timezone);
+  // if (!BUSINESS_DAYS.has(weekday)) return false;
+  // return hour >= CALLING_WINDOW_START_HOUR && hour < CALLING_WINDOW_END_HOUR;
 }
 
 /**

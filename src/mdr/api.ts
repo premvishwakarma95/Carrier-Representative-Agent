@@ -1,9 +1,16 @@
 /**
  * Typed functions for each MDR API operation (mock today, real once the
  * client builds it — see src/mock-mdr-api/ and requirements-tracker.md).
- * Field shapes match src/mock-mdr-api/data.ts and the client's PDF; two
- * fields (Load.invitedCarrierIds, Load.timing.bidEmailSentAt) are GAP-FILL
- * additions not in the client's spec — see src/mock-mdr-api/README.md.
+ *
+ * As of the 2026-07-20 client call, MDR's integration is push-based, not
+ * pull-based: MDR calls OUR webhook (src/server/mdrWebhook.ts) ~30 minutes
+ * after a carrier invitation goes out, with the load, invited carriers
+ * (id + do-not-call only — full profile requires the per-load carrier
+ * lookup below), and account settings all in one payload. There is no
+ * GET /loads or GET /loads/{id} in the client's confirmed API — load details
+ * only ever arrive via that webhook, which is why we now persist them
+ * locally (src/db/models/Load.ts) instead of re-fetching. The 4 confirmed
+ * read/write APIs below are the only ones MDR will actually expose.
  */
 import { mdr } from "./client.js";
 
@@ -35,7 +42,6 @@ export interface MdrLoad {
     deliveryWindowStart?: string;
     deliveryWindowEnd?: string;
     bidExpiration?: string;
-    bidEmailSentAt?: string; // GAP-FILL
     [key: string]: unknown;
   };
   cargo: {
@@ -62,8 +68,6 @@ export interface MdrLoad {
   warehouseStorage?: Record<string, unknown>;
   quoteThreshold: number;
   bidCloseAt?: string;
-  status: "open" | "threshold_met" | "closed" | "awarded" | "paused" | "cancelled";
-  invitedCarrierIds: string[]; // GAP-FILL
 }
 
 export interface MdrCarrierContact {
@@ -91,7 +95,19 @@ export interface MdrCarrier {
     fraudFlag: boolean;
   };
   serviceHistory: { laneCount?: number; lastServiceDate?: string };
-  doNotCall: { calls: boolean; email: boolean; reason?: string; source?: string; recordedAt?: string | null };
+  doNotCall: {
+    calls: boolean;
+    email: boolean;
+    reason?: string;
+    source?: string;
+    updatedBy?: string;
+    recordedAt?: string | null;
+  };
+}
+
+/** Result of the per-(carrier, load) lookup — carrier profile plus whether they've already quoted this specific load. */
+export interface MdrCarrierForLoad extends MdrCarrier {
+  hasQuoted: boolean;
 }
 
 export interface MdrQuote {
@@ -127,46 +143,27 @@ export interface MdrAccountSettings {
   negotiationAuthority: string;
 }
 
-export async function getLoadsList(status?: string): Promise<Array<{ id: string; externalId: string; status: string }>> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  const res = await mdr.get<{ loads: Array<{ id: string; externalId: string; status: string }> }>(`/loads${query}`);
-  return res.loads;
-}
-
-export function getLoad(loadId: string): Promise<MdrLoad> {
-  return mdr.get<MdrLoad>(`/loads/${loadId}`);
-}
+// The 4 APIs MDR confirmed on the 2026-07-20 client call. No load-discovery
+// or bare carrier-lookup endpoints exist in the confirmed surface — loads
+// arrive via webhook (src/db/models/Load.ts), and carrier lookups are always
+// scoped to a specific load.
 
 export function getLoadQuoteStatus(loadId: string): Promise<MdrQuoteStatus> {
   return mdr.get<MdrQuoteStatus>(`/loads/${loadId}/quote-status`);
-}
-
-export async function getLoadQuotes(loadId: string): Promise<MdrQuote[]> {
-  const res = await mdr.get<{ quotes: MdrQuote[] }>(`/loads/${loadId}/quotes`);
-  return res.quotes;
 }
 
 export function submitQuote(loadId: string, data: Record<string, unknown>): Promise<MdrQuote> {
   return mdr.post<MdrQuote>(`/loads/${loadId}/quotes`, data);
 }
 
-export async function getCarriers(ids?: string[]): Promise<MdrCarrier[]> {
-  const query = ids && ids.length > 0 ? `?ids=${ids.join(",")}` : "";
-  const res = await mdr.get<{ carriers: MdrCarrier[] }>(`/carriers${query}`);
-  return res.carriers;
-}
-
-export function getCarrier(carrierId: string): Promise<MdrCarrier> {
-  return mdr.get<MdrCarrier>(`/carriers/${carrierId}`);
+/** GET /carriers/{carrier_id}/{load_id} — carrier profile + whether they've already quoted this load. */
+export function getCarrierForLoad(carrierId: string, loadId: string): Promise<MdrCarrierForLoad> {
+  return mdr.get<MdrCarrierForLoad>(`/carriers/${carrierId}/${loadId}`);
 }
 
 export function updateDoNotCall(
   carrierId: string,
-  data: { scope: "calls_only" | "calls_and_email"; reason?: string }
+  data: { scope: "calls_only" | "calls_and_email"; reason?: string; updatedBy?: string }
 ): Promise<MdrCarrier> {
   return mdr.patch<MdrCarrier>(`/carriers/${carrierId}/do-not-call`, data);
-}
-
-export function getAccountSettings(accountId: string): Promise<MdrAccountSettings> {
-  return mdr.get<MdrAccountSettings>(`/accounts/${accountId}/settings`);
 }

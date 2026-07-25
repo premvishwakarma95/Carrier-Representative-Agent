@@ -14,9 +14,10 @@
  * endpoints the client's API actually covers. Everything else (declines,
  * callbacks, escalations) has no MDR equivalent and stays local only.
  */
-import { CallAttempt, Escalation } from "../db/models/index.js";
+import { CallAttempt, Escalation, Quote } from "../db/models/index.js";
 import { checkStopConditions } from "../orchestration/stopConditions.js";
 import { submitQuote as submitQuoteToMdr, updateDoNotCall } from "../mdr/api.js";
+import { applyCallOutcome } from "./callOutcome.js";
 import type { HydratedDocument } from "mongoose";
 
 type ToolCall = { id: string; name: string; parameters: Record<string, any> };
@@ -74,8 +75,7 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     params.carrierConfirmedReadBack && params.baseRate != null && params.totalEstimatedAllIn != null
   );
 
-  const quote = await submitQuoteToMdr(attempt.loadId, {
-    carrierId: attempt.carrierId,
+  const quotePayload = {
     serviceScope: params.serviceScope,
     baseRate: params.baseRate,
     fuelSurcharge: params.fuelSurcharge,
@@ -92,7 +92,30 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     isConditional: params.isConditional ?? false,
     conditionalOn: params.conditionalOn,
     carrierConfirmedReadBack: Boolean(params.carrierConfirmedReadBack),
+  };
+
+  // Written before the MDR call so there's proof of exactly what was
+  // captured even if the MDR submission below fails.
+  const localQuote = await Quote.create({
+    loadId: attempt.loadId,
+    carrierId: attempt.carrierId,
+    callAttemptId: attempt._id,
+    ...quotePayload,
+    mdrSubmissionStatus: "failed",
   });
+
+  const quote = await submitQuoteToMdr(attempt.loadId, { carrierId: attempt.carrierId, ...quotePayload }).catch(
+    async (err) => {
+      localQuote.mdrError = (err as Error).message;
+      await localQuote.save();
+      throw err;
+    }
+  );
+
+  localQuote.mdrQuoteId = quote.id;
+  localQuote.mdrStatus = quote.status;
+  localQuote.mdrSubmissionStatus = "submitted";
+  await localQuote.save();
 
   attempt.callResult = params.isConditional ? "conditional_quote" : "quote_received";
   await attempt.save();
@@ -140,6 +163,7 @@ async function escalateToHuman(params: any, { attempt }: CallContext) {
 async function recordDoNotCall(params: any, { attempt }: CallContext) {
   await updateDoNotCall(attempt.carrierId, {
     scope: params.scope === "calls_and_email" ? "calls_and_email" : "calls_only",
+    updatedBy: "everly-system",
   });
 
   attempt.callResult = "do_not_call";
@@ -166,15 +190,12 @@ export async function handleEndOfCallReport(message: any) {
     return;
   }
 
-  attempt.transcript = message.artifact?.transcript;
-  attempt.recordingUrl = message.artifact?.recording?.stereoUrl ?? message.artifact?.recording?.url;
-  attempt.summary = message.summary ?? message.analysis?.summary;
-  attempt.endedReason = message.endedReason;
-  attempt.endedAt = new Date();
-
-  if (attempt.status === "in_progress") {
-    attempt.status = message.endedReason?.includes("voicemail") ? "voicemail" : "completed";
-  }
+  applyCallOutcome(attempt, {
+    endedReason: message.endedReason,
+    transcript: message.artifact?.transcript,
+    recordingUrl: message.artifact?.recording?.stereoUrl,
+    summary: message.summary ?? message.analysis?.summary,
+  });
 
   await attempt.save();
   await checkStopConditions(attempt.loadId);

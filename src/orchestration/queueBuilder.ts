@@ -4,27 +4,26 @@
  * capacity, responsiveness, compliance; explicitly NOT ranked by cheapest
  * historical rate, since we don't have pricing before calling anyway).
  *
- * Candidate pool starts from load.invitedCarrierIds (GAP-FILL — not in the
- * client's PDF spec, see src/mock-mdr-api/README.md) rather than the general
- * carrier eligibility directory, so we only ever call carriers MDR actually
- * invited to bid on this load.
+ * Candidate pool starts from the load's locally-stored `invitedCarriers`
+ * (from MDR's push webhook, see src/db/models/Load.ts) rather than any
+ * carrier-search endpoint — MDR's confirmed API has no way to look up
+ * carriers except scoped to a specific (carrier, load) pair, so full profile
+ * + current quoted/do-not-call state is fetched fresh per candidate here.
  */
-import { getCarriers, getLoadQuotes } from "../mdr/api.js";
-import type { MdrLoad, MdrCarrier } from "../mdr/api.js";
+import { getCarrierForLoad } from "../mdr/api.js";
+import type { MdrCarrierForLoad } from "../mdr/api.js";
+import type { LocalLoad } from "../db/models/Load.js";
 
-export async function buildCarrierQueue(load: MdrLoad): Promise<MdrCarrier[]> {
-  const [invitedCarriers, quotes] = await Promise.all([
-    getCarriers(load.invitedCarrierIds),
-    getLoadQuotes(load.id),
-  ]);
-
-  const alreadyQuotedCarrierIds = new Set(
-    quotes.filter((q) => q.status === "valid").map((q) => q.carrierId)
+export async function buildCarrierQueue(load: LocalLoad): Promise<MdrCarrierForLoad[]> {
+  const candidates = await Promise.all(
+    load.invitedCarriers
+      .filter((invited) => !invited.doNotCall) // skip the fetch entirely for carriers already flagged at invite time
+      .map((invited) => getCarrierForLoad(invited.carrierId, load.id))
   );
 
-  const eligible = invitedCarriers.filter(
+  const eligible = candidates.filter(
     (carrier) =>
-      !alreadyQuotedCarrierIds.has(carrier.id) &&
+      !carrier.hasQuoted &&
       !carrier.doNotCall.calls &&
       carrier.eligibility.approvedAuthority &&
       carrier.eligibility.approvedInsurance &&
@@ -35,17 +34,17 @@ export async function buildCarrierQueue(load: MdrLoad): Promise<MdrCarrier[]> {
   return rankCarriers(eligible, load);
 }
 
-function rankCarriers(carriers: MdrCarrier[], load: MdrLoad): MdrCarrier[] {
+function rankCarriers(carriers: MdrCarrierForLoad[], load: LocalLoad): MdrCarrierForLoad[] {
   return carriers
     .map((carrier) => ({ carrier, score: scoreCarrier(carrier, load) }))
     .sort((a, b) => b.score - a.score)
     .map((entry) => entry.carrier);
 }
 
-function scoreCarrier(carrier: MdrCarrier, load: MdrLoad): number {
+function scoreCarrier(carrier: MdrCarrierForLoad, load: LocalLoad): number {
   let score = 0;
 
-  const equipmentTag = [load.equipment.containerSize, load.equipment.containerType]
+  const equipmentTag = [load.equipment?.containerSize, load.equipment?.containerType]
     .filter(Boolean)
     .join("_");
   if (equipmentTag && carrier.eligibility.approvedEquipment?.includes(equipmentTag)) {
@@ -53,7 +52,7 @@ function scoreCarrier(carrier: MdrCarrier, load: MdrLoad): number {
   }
 
   if (
-    load.routing.deliveryState &&
+    load.routing?.deliveryState &&
     carrier.eligibility.approvedGeography?.includes(load.routing.deliveryState as string)
   ) {
     score += 5;

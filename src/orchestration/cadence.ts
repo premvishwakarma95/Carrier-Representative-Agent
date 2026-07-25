@@ -8,9 +8,12 @@
  * Every computed time is snapped forward to the carrier's calling window if it
  * would otherwise fall outside Mon-Fri 8am-5pm local.
  *
- * Assumption: Load.createdAt is treated as the bid-email-sent timestamp, since
- * we don't yet have a separate MDR-provided "email sent at" field. Revisit
- * once real MDR integration lands (Phase 2).
+ * Per the 2026-07-20 client call, MDR now pushes the load to Everly's webhook
+ * ~30 minutes after the carrier invitation goes out (see
+ * src/server/mdrWebhook.ts) — i.e. the email-wait window has already elapsed
+ * by the time a Load exists locally at all. So attempt 1 uses the webhook's
+ * receivedAt directly as its baseline rather than adding emailWaitMinutes
+ * again on top of it.
  */
 import { nextCallingWindowOpen, nextBusinessMorning } from "./callingWindow.js";
 
@@ -22,15 +25,13 @@ const OFFSET_MINUTES_FROM_PREVIOUS: Record<number, number> = {
 export function computeAttemptSchedule(params: {
   attemptNumber: number;
   timezone: string;
-  emailSentAt: Date;
-  emailWaitMinutes: number;
+  webhookReceivedAt: Date;
   previousAttemptAt?: Date;
 }): Date {
-  const { attemptNumber, timezone, emailSentAt, emailWaitMinutes, previousAttemptAt } = params;
+  const { attemptNumber, timezone, webhookReceivedAt, previousAttemptAt } = params;
 
   if (attemptNumber === 1) {
-    const target = new Date(emailSentAt.getTime() + emailWaitMinutes * 60_000);
-    return nextCallingWindowOpen(timezone, target);
+    return nextCallingWindowOpen(timezone, webhookReceivedAt);
   }
 
   if (!previousAttemptAt) {

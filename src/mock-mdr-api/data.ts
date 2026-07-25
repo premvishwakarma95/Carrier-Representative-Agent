@@ -28,7 +28,7 @@ function seedCarriers() {
       usdotNumber: "USDOT-7891011",
       contacts: [
         // Real test number (temporary — see requirements-tracker.md test-flow note)
-        { name: "Maria Gomez", phone: "+919589817903", email: "dispatch@pacificcoastdrayage.example", role: "dispatch", preferredMethod: "phone" },
+        { name: "Prem Vishwakarma", phone: "+919589817903", email: "vprem9589@gmail.com", role: "dispatch", preferredMethod: "phone" },
       ],
       timezone: "Asia/Kolkata",
       eligibility: {
@@ -50,7 +50,7 @@ function seedCarriers() {
       usdotNumber: "USDOT-1122334",
       contacts: [
         // Real test number (temporary — see requirements-tracker.md test-flow note)
-        { name: "James Whitfield", phone: "+918349086753", email: "ops@norfolkintermodal.example", role: "dispatch", preferredMethod: "email" },
+        { name: "Harsh Sharma", phone: "+918349086753", email: "harsh.ibrinfotech@gmail.com", role: "dispatch", preferredMethod: "email" },
       ],
       timezone: "Asia/Kolkata",
       eligibility: {
@@ -72,7 +72,7 @@ function seedCarriers() {
       usdotNumber: "USDOT-5566778",
       contacts: [
         // Real test number (temporary — see requirements-tracker.md test-flow note)
-        { name: "Priya Natarajan", phone: "+918871148578", email: "quotes@gulfcartage.example", role: "pricing", preferredMethod: "phone" },
+        { name: "Harsh Sharma", phone: "+918871148578", email: "shubhamk.ibr@gmail.com", role: "pricing", preferredMethod: "phone" },
       ],
       timezone: "Asia/Kolkata",
       eligibility: {
