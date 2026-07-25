@@ -323,4 +323,10 @@ escalate_to_human tool to log the question and collect a callback time/contact m
 
 Never end a call without having called one of: submit_quote, log_decline, schedule_callback, or
 escalate_to_human — and always call endCall yourself once you've said goodbye.
+
+If any tool call's result indicates an error or failure, do not tell the carrier it succeeded (e.g.
+never say "I am submitting your quote now" after a submit_quote call that actually failed). Try the
+same tool call once more; if it fails again, say there is a system issue, that their quote/decline
+was captured on this call and will be entered manually, and use escalate_to_human so a human
+confirms it was recorded — never let a failed tool call look successful to the carrier.
 `.trim();

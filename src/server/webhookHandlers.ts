@@ -41,6 +41,10 @@ export async function handleToolCalls(toolCallList: ToolCall[], vapiCallId: stri
       const result = await dispatchTool(call.name, call.parameters, context);
       results.push({ toolCallId: call.id, name: call.name, result: JSON.stringify(result) });
     } catch (err) {
+      // Previously silent — a real submit_quote failure (server 404 during a
+      // dispatch cron collision, 2026-07-25) went completely unlogged here,
+      // discoverable only via Vapi's own call message history days later.
+      console.error(`Tool call ${call.name} failed for vapiCallId ${vapiCallId}:`, err);
       results.push({
         toolCallId: call.id,
         name: call.name,
