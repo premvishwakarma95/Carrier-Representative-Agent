@@ -44,15 +44,26 @@ const assistantPayload = {
     model: "nova-3",
     language: "en",
   },
-  // Default endpointing was cutting the carrier off mid-sentence — a real
-  // call showed numAssistantInterrupted: 6 in Vapi's own performance
-  // metrics, which also explains garbled/stitched-together assistant
-  // responses seen in transcripts. Vapi's smart endpointing (model-based,
-  // not just silence-duration) plus a slightly longer wait reduces
-  // premature barge-ins at the cost of a bit more turn latency.
+  // startSpeakingPlan (how patiently Everly waits before she starts talking)
+  // didn't move numAssistantInterrupted at all on the next test call — the
+  // transcript showed HER speech getting cut off mid-word ("...includes the
+  // CHAS Next..."), which means that metric is about her getting
+  // interrupted, not her interrupting the carrier. Left in place since a
+  // longer/smarter wait before she starts is still reasonable on its own.
   startSpeakingPlan: {
     waitSeconds: 0.8,
     smartEndpointingPlan: { provider: "vapi" },
+  },
+  // The actual fix for that: stopSpeakingPlan controls how easily she gets
+  // cut off once she's already talking. Default is very sensitive (any
+  // sound counts), so background noise or a short "yeah"/"uh" from the
+  // carrier was killing her mid-sentence. Requiring 2 real words before it
+  // counts as a genuine interruption, plus a brief backoff before she
+  // resumes, should stop the mid-word cutoffs seen in transcripts.
+  stopSpeakingPlan: {
+    numWords: 2,
+    voiceSeconds: 0.2,
+    backoffSeconds: 1,
   },
   endCallMessage:
     "Thank you for your time today. Have a great rest of your day.",
