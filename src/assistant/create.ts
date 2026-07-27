@@ -38,7 +38,17 @@ const assistantPayload = {
   voice: {
     provider: "11labs",
     voiceId: "gE0owC0H9C8SzfDyIUtB",
-    model: "eleven_turbo_v2_5", // lower-latency ElevenLabs model — turn latency was ~2-2.5s, voice was one of the bigger contributors
+    // Switched from eleven_turbo_v2_5 to eleven_multilingual_v2 (2026-07-27) —
+    // turbo was chosen earlier specifically for lower latency, but client
+    // feedback confirmed the same flat "tune" throughout the call regardless
+    // of the words spoken (verified: transcript showed varied, situationally
+    // appropriate text, so this is a voice-model prosody limitation, not a
+    // prompt issue). Turbo trades away expressive/prosodic range for speed;
+    // multilingual_v2 is ElevenLabs' higher-quality model with more of that
+    // range. Trade-off: turn latency will increase back toward the ~2-2.5s
+    // that turbo was originally introduced to fix — worth it only if this
+    // actually sounds more human on a test call.
+    model: "eleven_multilingual_v2",
     // speed raised from 0.9 back to 1.0 (2026-07-27) — 0.9 was slowed down
     // earlier to fix a "rushed"-sounding complaint, but next feedback was
     // that it now reads as too slow. 1.0 is ElevenLabs' normal/neutral pace.
