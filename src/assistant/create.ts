@@ -58,6 +58,11 @@ const assistantPayload = {
     provider: "cartesia",
     voiceId: "cbaf8084-f009-4838-a096-07ee2e6612b1", // "Maya" — one of Cartesia's 8 emotion-tuned voices
     model: "sonic-3",
+    // Cartesia's native speed control, range [-1.0, 1.0] (0 = default,
+    // negative = slower) — nested under experimentalControls, not a
+    // top-level "speed" field like ElevenLabs used. Slight decrease
+    // (2026-07-27) per feedback that default pace read as a bit fast.
+    experimentalControls: { speed: -0.15 },
   },
   transcriber: {
     provider: "deepgram",
