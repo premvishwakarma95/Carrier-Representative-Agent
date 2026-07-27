@@ -35,23 +35,27 @@ const assistantPayload = {
   // one that sounds natural enough — not in Vapi's curated voice-library
   // browse list, which only surfaces a fixed preset subset, not ElevenLabs'
   // full catalog.
+  // Switched provider from ElevenLabs to Cartesia (2026-07-27) — real
+  // turn-latency data from an eleven_v3 test call measured 1.85s average,
+  // up to 4.81s (see git history for the raw numbers), confirmed
+  // unacceptable. eleven_v3 was the only ElevenLabs model supporting the
+  // audio-tag emotion system the client wanted, and turbo_v2_5/
+  // multilingual_v2 don't support it — an ElevenLabs-only fix would have
+  // meant giving up either speed or expressiveness. Cartesia's Sonic model
+  // is marketed as delivering both (per Cartesia, ~90ms latency with
+  // natural inflection/emotional cues) — this is unverified by us in
+  // practice, watch the next real test call closely for both latency and
+  // quality. Voice is a curated Cartesia voice via Vapi's voice-library
+  // (not a clone of the prior ElevenLabs voice — client declined the
+  // clone-from-sample path), picked for its "warmth and authority for
+  // customer service" description matching this agent's target
+  // personality. The prior ElevenLabs config (voiceId gE0owC0H9C8SzfDyIUtB,
+  // eleven_turbo_v2_5, stability 0.3/style 0.65) is fully reversible — see
+  // git history — if Cartesia doesn't hold up.
   voice: {
-    provider: "11labs",
-    voiceId: "gE0owC0H9C8SzfDyIUtB",
-    // Switched to eleven_v3 (2026-07-27) — client explicitly wants the
-    // audio-tag system ([excited], [sighs], [laughs], etc, see prompt.ts)
-    // for genuine situational emotion, which ONLY eleven_v3 understands;
-    // turbo_v2_5/multilingual_v2 would either strip those bracket tags or
-    // read them aloud as literal text. Known risk accepted per client
-    // request: v3 is ElevenLabs' alpha/research-preview model with no
-    // published real-time latency guidance, and turbo_v2_5 was chosen
-    // earlier specifically for low latency — watch turn latency on the next
-    // real test call and be ready to revert if it's unacceptably slow.
-    model: "eleven_v3",
-    speed: 1.0,
-    stability: 0.3,
-    similarityBoost: 0.8,
-    style: 0.65,
+    provider: "cartesia",
+    voiceId: "a7a59115-2425-4192-844c-1e98ec7d6877", // "Amber - Warm Support Agent"
+    model: "sonic-3",
   },
   transcriber: {
     provider: "deepgram",
