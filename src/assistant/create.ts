@@ -37,24 +37,26 @@ const assistantPayload = {
   // full catalog.
   // Switched provider from ElevenLabs to Cartesia (2026-07-27) — real
   // turn-latency data from an eleven_v3 test call measured 1.85s average,
-  // up to 4.81s (see git history for the raw numbers), confirmed
-  // unacceptable. eleven_v3 was the only ElevenLabs model supporting the
-  // audio-tag emotion system the client wanted, and turbo_v2_5/
-  // multilingual_v2 don't support it — an ElevenLabs-only fix would have
-  // meant giving up either speed or expressiveness. Cartesia's Sonic model
-  // is marketed as delivering both (per Cartesia, ~90ms latency with
-  // natural inflection/emotional cues) — this is unverified by us in
-  // practice, watch the next real test call closely for both latency and
-  // quality. Voice is a curated Cartesia voice via Vapi's voice-library
-  // (not a clone of the prior ElevenLabs voice — client declined the
-  // clone-from-sample path), picked for its "warmth and authority for
-  // customer service" description matching this agent's target
-  // personality. The prior ElevenLabs config (voiceId gE0owC0H9C8SzfDyIUtB,
-  // eleven_turbo_v2_5, stability 0.3/style 0.65) is fully reversible — see
-  // git history — if Cartesia doesn't hold up.
+  // up to 4.81s (see git history), confirmed unacceptable. eleven_v3 was
+  // the only ElevenLabs model supporting the audio-tag emotion system the
+  // client wanted; turbo_v2_5/multilingual_v2 don't support it — forcing a
+  // choice between speed and expressiveness. Cartesia has both: Sonic-3
+  // (~90ms latency) plus its own emotion-tag system (see prompt.ts).
+  // voiceId switched from the initial pick ("Amber", a Vapi-curated
+  // Cartesia voice) to "Maya" — Cartesia's own docs list only 8 voices
+  // (Leo, Jace, Kyle, Gavin, Maya, Tessa, Dana, Marian) as tuned for
+  // reliable emotion-tag response, and Amber isn't one of them. Maya isn't
+  // in Vapi's curated Cartesia browse list either, but Vapi accepts
+  // arbitrary Cartesia voice IDs (confirmed via direct API test), same
+  // passthrough behavior as ElevenLabs. Not a clone of the prior ElevenLabs
+  // voice — client declined the clone-from-sample path. Accent/quality on
+  // this specific script is unverified — watch the next real test call.
+  // The prior ElevenLabs config (voiceId gE0owC0H9C8SzfDyIUtB,
+  // eleven_turbo_v2_5, stability 0.3/style 0.65) is fully reversible via
+  // git history if neither Cartesia voice holds up.
   voice: {
     provider: "cartesia",
-    voiceId: "a7a59115-2425-4192-844c-1e98ec7d6877", // "Amber - Warm Support Agent"
+    voiceId: "cbaf8084-f009-4838-a096-07ee2e6612b1", // "Maya" — one of Cartesia's 8 emotion-tuned voices
     model: "sonic-3",
   },
   transcriber: {
