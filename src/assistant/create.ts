@@ -38,23 +38,26 @@ const assistantPayload = {
   voice: {
     provider: "11labs",
     voiceId: "gE0owC0H9C8SzfDyIUtB",
-    // Switched from eleven_turbo_v2_5 to eleven_multilingual_v2 (2026-07-27) —
-    // turbo was chosen earlier specifically for lower latency, but client
-    // feedback confirmed the same flat "tune" throughout the call regardless
-    // of the words spoken (verified: transcript showed varied, situationally
-    // appropriate text, so this is a voice-model prosody limitation, not a
-    // prompt issue). Turbo trades away expressive/prosodic range for speed;
-    // multilingual_v2 is ElevenLabs' higher-quality model with more of that
-    // range. Trade-off: turn latency will increase back toward the ~2-2.5s
-    // that turbo was originally introduced to fix — worth it only if this
-    // actually sounds more human on a test call.
-    model: "eleven_multilingual_v2",
+    // Briefly switched to eleven_multilingual_v2 (2026-07-27) to test whether
+    // flat delivery was a voice-model prosody limitation — client felt the
+    // added wait (multilingual_v2 is slower than turbo) wasn't worth it.
+    // Reverted to turbo_v2_5 and isolating the "style" param below instead,
+    // which works on both models and doesn't cost latency.
+    model: "eleven_turbo_v2_5",
     // speed raised from 0.9 back to 1.0 (2026-07-27) — 0.9 was slowed down
     // earlier to fix a "rushed"-sounding complaint, but next feedback was
     // that it now reads as too slow. 1.0 is ElevenLabs' normal/neutral pace.
     speed: 1.0,
     stability: 0.4,
     similarityBoost: 0.8,
+    // Added (2026-07-27) — separate from stability, ElevenLabs' "style"
+    // parameter controls how much of the voice's expressive/emotional range
+    // actually gets applied (0 = none, i.e. flat regardless of the words
+    // spoken). It was never set before, so it was defaulting to 0 — likely
+    // the real cause of "same tune throughout" complaints. Kept after
+    // reverting the model change above, to isolate whether style alone
+    // fixes tone without the multilingual_v2 latency cost.
+    style: 0.4,
   },
   transcriber: {
     provider: "deepgram",
