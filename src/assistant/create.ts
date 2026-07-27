@@ -48,16 +48,22 @@ const assistantPayload = {
     // earlier to fix a "rushed"-sounding complaint, but next feedback was
     // that it now reads as too slow. 1.0 is ElevenLabs' normal/neutral pace.
     speed: 1.0,
-    stability: 0.4,
+    // stability lowered 0.4 -> 0.3 (2026-07-27) — lower stability widens
+    // ElevenLabs' emotional/prosodic range per-generation, at some cost to
+    // moment-to-moment consistency. Pushed further after 0.4 + style 0.4
+    // still tested as "same tune everywhere."
+    stability: 0.3,
     similarityBoost: 0.8,
-    // Added (2026-07-27) — separate from stability, ElevenLabs' "style"
-    // parameter controls how much of the voice's expressive/emotional range
-    // actually gets applied (0 = none, i.e. flat regardless of the words
-    // spoken). It was never set before, so it was defaulting to 0 — likely
-    // the real cause of "same tune throughout" complaints. Kept after
-    // reverting the model change above, to isolate whether style alone
-    // fixes tone without the multilingual_v2 latency cost.
-    style: 0.4,
+    // style ("style exaggeration," separate from stability) raised 0.4 ->
+    // 0.65 for the same reason. Considered switching to eleven_v3 for its
+    // explicit audio-tag system ([excited], [whispers], etc.) instead, but
+    // rejected it (2026-07-27) — v3 is an alpha/research-preview model with
+    // no published real-time latency guidance, and the client already
+    // rejected eleven_multilingual_v2 (a much more mature model) for adding
+    // too much latency. Not worth risking call stability/latency in
+    // production for this; pushing stability/style further on the proven
+    // turbo model is the safer lever.
+    style: 0.65,
   },
   transcriber: {
     provider: "deepgram",
