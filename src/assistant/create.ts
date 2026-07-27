@@ -38,31 +38,19 @@ const assistantPayload = {
   voice: {
     provider: "11labs",
     voiceId: "gE0owC0H9C8SzfDyIUtB",
-    // Briefly switched to eleven_multilingual_v2 (2026-07-27) to test whether
-    // flat delivery was a voice-model prosody limitation — client felt the
-    // added wait (multilingual_v2 is slower than turbo) wasn't worth it.
-    // Reverted to turbo_v2_5 and isolating the "style" param below instead,
-    // which works on both models and doesn't cost latency.
-    model: "eleven_turbo_v2_5",
-    // speed raised from 0.9 back to 1.0 (2026-07-27) — 0.9 was slowed down
-    // earlier to fix a "rushed"-sounding complaint, but next feedback was
-    // that it now reads as too slow. 1.0 is ElevenLabs' normal/neutral pace.
+    // Switched to eleven_v3 (2026-07-27) — client explicitly wants the
+    // audio-tag system ([excited], [sighs], [laughs], etc, see prompt.ts)
+    // for genuine situational emotion, which ONLY eleven_v3 understands;
+    // turbo_v2_5/multilingual_v2 would either strip those bracket tags or
+    // read them aloud as literal text. Known risk accepted per client
+    // request: v3 is ElevenLabs' alpha/research-preview model with no
+    // published real-time latency guidance, and turbo_v2_5 was chosen
+    // earlier specifically for low latency — watch turn latency on the next
+    // real test call and be ready to revert if it's unacceptably slow.
+    model: "eleven_v3",
     speed: 1.0,
-    // stability lowered 0.4 -> 0.3 (2026-07-27) — lower stability widens
-    // ElevenLabs' emotional/prosodic range per-generation, at some cost to
-    // moment-to-moment consistency. Pushed further after 0.4 + style 0.4
-    // still tested as "same tune everywhere."
     stability: 0.3,
     similarityBoost: 0.8,
-    // style ("style exaggeration," separate from stability) raised 0.4 ->
-    // 0.65 for the same reason. Considered switching to eleven_v3 for its
-    // explicit audio-tag system ([excited], [whispers], etc.) instead, but
-    // rejected it (2026-07-27) — v3 is an alpha/research-preview model with
-    // no published real-time latency guidance, and the client already
-    // rejected eleven_multilingual_v2 (a much more mature model) for adding
-    // too much latency. Not worth risking call stability/latency in
-    // production for this; pushing stability/style further on the proven
-    // turbo model is the safer lever.
     style: 0.65,
   },
   transcriber: {
