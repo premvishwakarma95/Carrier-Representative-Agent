@@ -35,34 +35,23 @@ const assistantPayload = {
   // one that sounds natural enough — not in Vapi's curated voice-library
   // browse list, which only surfaces a fixed preset subset, not ElevenLabs'
   // full catalog.
-  // Switched provider from ElevenLabs to Cartesia (2026-07-27) — real
-  // turn-latency data from an eleven_v3 test call measured 1.85s average,
-  // up to 4.81s (see git history), confirmed unacceptable. eleven_v3 was
-  // the only ElevenLabs model supporting the audio-tag emotion system the
-  // client wanted; turbo_v2_5/multilingual_v2 don't support it — forcing a
-  // choice between speed and expressiveness. Cartesia has both: Sonic-3
-  // (~90ms latency) plus its own emotion-tag system (see prompt.ts).
-  // voiceId switched from the initial pick ("Amber", a Vapi-curated
-  // Cartesia voice) to "Maya" — Cartesia's own docs list only 8 voices
-  // (Leo, Jace, Kyle, Gavin, Maya, Tessa, Dana, Marian) as tuned for
-  // reliable emotion-tag response, and Amber isn't one of them. Maya isn't
-  // in Vapi's curated Cartesia browse list either, but Vapi accepts
-  // arbitrary Cartesia voice IDs (confirmed via direct API test), same
-  // passthrough behavior as ElevenLabs. Not a clone of the prior ElevenLabs
-  // voice — client declined the clone-from-sample path. Accent/quality on
-  // this specific script is unverified — watch the next real test call.
-  // The prior ElevenLabs config (voiceId gE0owC0H9C8SzfDyIUtB,
-  // eleven_turbo_v2_5, stability 0.3/style 0.65) is fully reversible via
-  // git history if neither Cartesia voice holds up.
   voice: {
-    provider: "cartesia",
-    voiceId: "cbaf8084-f009-4838-a096-07ee2e6612b1", // "Maya" — one of Cartesia's 8 emotion-tuned voices
-    model: "sonic-3",
-    // Cartesia's native speed control, range [-1.0, 1.0] (0 = default,
-    // negative = slower) — nested under experimentalControls, not a
-    // top-level "speed" field like ElevenLabs used. Slight decrease
-    // (2026-07-27) per feedback that default pace read as a bit fast.
-    experimentalControls: { speed: -0.15 },
+    provider: "11labs",
+    voiceId: "gE0owC0H9C8SzfDyIUtB",
+    // Switched to eleven_v3 (2026-07-27) — client explicitly wants the
+    // audio-tag system ([excited], [sighs], [laughs], etc, see prompt.ts)
+    // for genuine situational emotion, which ONLY eleven_v3 understands;
+    // turbo_v2_5/multilingual_v2 would either strip those bracket tags or
+    // read them aloud as literal text. Known risk accepted per client
+    // request: v3 is ElevenLabs' alpha/research-preview model with no
+    // published real-time latency guidance, and turbo_v2_5 was chosen
+    // earlier specifically for low latency — watch turn latency on the next
+    // real test call and be ready to revert if it's unacceptably slow.
+    model: "eleven_v3",
+    speed: 1.0,
+    stability: 0.3,
+    similarityBoost: 0.8,
+    style: 0.65,
   },
   transcriber: {
     provider: "deepgram",
