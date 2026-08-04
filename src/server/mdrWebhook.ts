@@ -10,11 +10,25 @@
  * to stand in for it.
  */
 import { Router } from "express";
-import { Load } from "../db/models/index.js";
+import { Load, WebhookResponse } from "../db/models/index.js";
 
 const WEBHOOK_SECRET = process.env.MDR_WEBHOOK_SECRET ?? "mock-webhook-secret";
 
 export const mdrWebhookRouter = Router();
+
+/**
+ * Raw-capture endpoint for MDR's real webhook (new draft docs: "load.posted"
+ * event, shape not yet confirmed/built against — see CLAUDE.md). Stores
+ * whatever is sent as-is in WebhookResponse, unparsed, so real traffic can be
+ * inspected before the Load model and orchestration flow get rebuilt against
+ * the confirmed payload shape. No auth check yet — MDR's real signing/auth
+ * scheme for this webhook isn't confirmed, and rejecting on a guessed scheme
+ * would silently drop real capture data during this discovery phase.
+ */
+mdrWebhookRouter.post("/capture", async (req, res) => {
+  await WebhookResponse.create({ timestamp: new Date(), data: req.body });
+  res.status(200).json({ ok: true });
+});
 
 mdrWebhookRouter.post("/load-ready", async (req, res) => {
   const auth = req.header("authorization");
