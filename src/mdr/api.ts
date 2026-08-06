@@ -1,13 +1,14 @@
 /**
- * Typed functions for MDR's real Voice API endpoints, confirmed against
- * live staging responses (see project memory / CLAUDE.md for the full
- * endpoint list). Only "Get All Carriers" is implemented so far — the rest
- * (call-result, call-final-result, decline, stop, email-resend,
- * add-accessorials, add-warehouse, get-specific-carrier) come as directed.
+ * Typed functions for MDR's real Voice API endpoints (see "MDR Voice Team
+ * API Integration Guide"). Get All Carriers / Get Specific Carrier are
+ * confirmed against live staging responses; the rest (decline/stop/
+ * email-resend/add-accessorials/add-warehouse/call-result/call-final-result)
+ * are built directly from the doc's request/response examples, not yet
+ * exercised against staging.
  *
- * Endpoint method is unconfirmed (the doc's own table says GET, its detail
- * section header says POST) — using GET per the table; trivial to swap if
- * that turns out wrong.
+ * Get All Carriers / Get Specific Carrier's method is unconfirmed (the
+ * doc's own table says GET, its detail section header says POST) — using
+ * GET per the table, and confirmed working against real staging data.
  */
 import { mdr } from "./client.js";
 
@@ -119,4 +120,137 @@ export interface MdrGetSpecificCarrierResponse {
  */
 export function getSpecificCarrier(loadId: number, carrierId: number): Promise<MdrGetSpecificCarrierResponse> {
   return mdr.get<MdrGetSpecificCarrierResponse>(`/voice/load/${loadId}/carrier/${carrierId}`);
+}
+
+export interface MdrActionResponse {
+  success: boolean;
+  message: string;
+}
+
+/** Doc 2.5 — use only when the carrier explicitly refuses this load. */
+export function declineCarrier(outreachId: number, reason: string): Promise<MdrActionResponse> {
+  return mdr.post<MdrActionResponse>("/voice/decline", { outreach_id: outreachId, reason });
+}
+
+/** Doc 2.6 — stop contacting this carrier (opted out, wrong number, blocked, invalid phone). */
+export function stopCarrier(outreachId: number, reason: string): Promise<MdrActionResponse> {
+  return mdr.post<MdrActionResponse>("/voice/stop", { outreach_id: outreachId, reason });
+}
+
+/** Doc 2.7 — carrier asked for the invitation email to be resent. */
+export function resendInvitationEmail(outreachId: number): Promise<MdrActionResponse> {
+  return mdr.post<MdrActionResponse>("/voice/email-resend", { outreach_id: outreachId });
+}
+
+export interface MdrAddAccessorialResponse {
+  success: boolean;
+  accessorials: MdrAccessorial;
+}
+
+/** Doc 2.8 — register an accessorial the carrier named that isn't already in their known list. */
+export function addAccessorial(outreachId: number, name: string, price: number): Promise<MdrAddAccessorialResponse> {
+  return mdr.post<MdrAddAccessorialResponse>("/voice/add-accessorials", {
+    outreach_id: outreachId,
+    accessorial: name,
+    price,
+  });
+}
+
+export interface MdrAddWarehouseResponse {
+  success: boolean;
+  warehouse: MdrWarehouse;
+}
+
+/** Doc 2.9 — register a warehouse address the carrier named that isn't already in their known list. */
+export function addWarehouse(outreachId: number, address: string): Promise<MdrAddWarehouseResponse> {
+  return mdr.post<MdrAddWarehouseResponse>("/voice/add-warehouse", { outreach_id: outreachId, address });
+}
+
+/**
+ * Shared request shape for call-result (doc 2.3) and call-final-result (doc
+ * 2.4) — same fields, MDR expects the full set resent to each, not just a
+ * reference to the earlier call-result call.
+ */
+export interface MdrCallResultRequest {
+  outreach_id: number;
+  base_rate: number;
+  fsc: number;
+  acc_types: number[];
+  transload_rate?: number;
+  finalmile_rate?: number;
+  finalmile_fsc?: number;
+  is_warehouse: 0 | 1;
+  storage_rate?: number;
+  warehouse_id?: number;
+  rate_valid_until: string;
+  driver_available: string;
+  details?: string;
+}
+
+export interface MdrAccessorialCharge {
+  accessorial_id: number;
+  name: string;
+  unit_price: string;
+  quantity: string;
+  total: number;
+}
+
+export interface MdrRateCalculationData {
+  quote_id: number;
+  carrier_id: number;
+  carrier_name: string;
+  carrier_email: string;
+  quantity: string;
+  base_rate: { rate_per_unit: string; quantity: string; total: number };
+  fsc: { percentage: string; amount: number; calculation: string };
+  accessorial_charges: MdrAccessorialCharge[];
+  accessorial_total: number;
+  transload_charges: unknown;
+  final_rate: number;
+  rate_breakdown: {
+    base_rate_total: number;
+    fsc_amount: number;
+    accessorial_total: number;
+    transload_total: number;
+    grand_total: number;
+  };
+  driver_availability: string;
+  details: string;
+  existing_response: boolean;
+}
+
+export interface MdrCallResultResponse {
+  success: boolean;
+  rate_calculation: {
+    headers: Record<string, unknown>;
+    original: {
+      success: boolean;
+      message: string;
+      data: MdrRateCalculationData;
+    };
+    exception: unknown;
+  };
+}
+
+/**
+ * Doc 2.3 — call once mid-conversation, after the carrier has given their
+ * rate, to get MDR's calculated total back. That calculated total (not
+ * anything Everly computes herself) is what gets read back for
+ * confirmation before submitCallFinalResult.
+ */
+export function submitCallResult(payload: MdrCallResultRequest): Promise<MdrCallResultResponse> {
+  return mdr.post<MdrCallResultResponse>("/voice/call-result", payload);
+}
+
+export interface MdrCallFinalResultRequest extends MdrCallResultRequest {
+  all_in: 0 | 1;
+}
+
+export interface MdrCallFinalResultResponse {
+  success: boolean;
+}
+
+/** Doc 2.4 — call once, after the carrier explicitly confirms the calculated total. */
+export function submitCallFinalResult(payload: MdrCallFinalResultRequest): Promise<MdrCallFinalResultResponse> {
+  return mdr.post<MdrCallFinalResultResponse>("/voice/call-final-result", payload);
 }

@@ -47,5 +47,13 @@ export function buildCallVariables(load: any, carrier: MdrCarrierDetail) {
     targetRate: fallback(load.target_rate),
 
     specialRequirements: fallback(load.notes, "none"),
+
+    // Drives the storage/transload/final-mile pricing branch — see
+    // "Storage & final-mile pricing" in prompt.ts. storageDays/storagePallets
+    // are known quantities from the load itself, not something the carrier
+    // is asked for — only the carrier's rate for that known quantity is.
+    storageNeeded: load.storage_needed ? "yes" : "no",
+    storageDays: fallback(load.storage_days),
+    storagePallets: fallback(load.storage_pallets),
   };
 }

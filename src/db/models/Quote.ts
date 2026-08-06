@@ -1,16 +1,21 @@
 /**
- * Local audit copy of every quote Everly submits — kept independently of
- * MDR's own copy so there's durable proof of exactly what was captured and
- * sent, even if MDR's write fails, is delayed, or their system later shows
- * something different. Written at submission time in src/server/webhookHandlers.ts,
- * before the write to MDR is attempted, so a failed MDR submission still
- * leaves a record (mdrSubmissionStatus: "failed") rather than losing the
- * captured quote entirely.
+ * Local audit copy of the quote Everly builds for a call — kept
+ * independently of MDR's own copy so there's durable proof of exactly what
+ * was captured and sent, even if MDR's write fails, is delayed, or their
+ * system later shows something different. One record per CallAttempt
+ * (upserted on callAttemptId): calculateQuote() in webhookHandlers.ts
+ * creates/updates it with MDR's calculated rateCalculation as soon as
+ * call-result comes back, and submitQuote() updates the same record with
+ * the final confirmed fields once the carrier explicitly confirms and
+ * call-final-result is sent — so a carrier who never confirms still leaves
+ * a record of what was calculated, and a failed final MDR write still
+ * leaves a record of what was submitted (mdrSubmissionStatus: "failed").
  *
- * Deliberately NOT the source of truth MDR itself reads from — MDR's own
- * copy (src/mdr/api.ts, mock or real) still drives eligibility/threshold
- * decisions (getLoadQuoteStatus, getCarrierForLoad.hasQuoted). This is audit
- * data only, same category as CallAttempt/Escalation.
+ * Field names mirror MDR's real call-result/call-final-result request shape
+ * (src/mdr/api.ts) in camelCase, not the old speculative submit_quote
+ * schema (chassis/freeTime/detentionRate/capacity/transload/
+ * warehouseStorage/finalMile/isConditional) — none of those map to
+ * anything in the real API and have been dropped.
  */
 import { Schema, model, Types } from "mongoose";
 
@@ -18,29 +23,30 @@ const quoteSchema = new Schema(
   {
     loadId: { type: String, required: true, index: true },
     carrierId: { type: String, required: true, index: true },
-    callAttemptId: { type: Types.ObjectId, ref: "CallAttempt", required: true },
+    callAttemptId: { type: Types.ObjectId, ref: "CallAttempt", required: true, unique: true },
 
-    serviceScope: String,
     baseRate: Number,
-    fuelSurcharge: Schema.Types.Mixed,
-    chassis: Schema.Types.Mixed,
-    accessorials: [Schema.Types.Mixed],
-    freeTime: String,
-    detentionRate: Number,
-    totalEstimatedAllIn: Number,
-    capacity: String,
+    fsc: Number,
+    accTypes: [Number],
+    transloadRate: Number,
+    finalmileRate: Number,
+    finalmileFsc: Number,
+    isWarehouse: Number, // 0 or 1, matches MDR's own representation
+    storageRate: Number,
+    warehouseId: Number,
     rateValidUntil: String,
-    transload: Schema.Types.Mixed,
-    warehouseStorage: Schema.Types.Mixed,
-    finalMile: Schema.Types.Mixed,
-    isConditional: Boolean,
-    conditionalOn: String,
+    driverAvailable: String,
+    details: String,
+    allIn: Number, // 0 or 1 — derived from whether accTypes is empty, not asked
+
     carrierConfirmedReadBack: Boolean,
 
-    // Populated after MDR's write succeeds — see submitQuote() in webhookHandlers.ts.
-    mdrQuoteId: String,
-    mdrStatus: String,
-    mdrSubmissionStatus: { type: String, enum: ["submitted", "failed"], default: "submitted", index: true },
+    // MDR's own calculated breakdown from call-result — see MdrCallResultResponse.
+    rateCalculation: Schema.Types.Mixed,
+    mdrQuoteId: Number,
+
+    // Populated once call-final-result is actually sent — see submitQuote() in webhookHandlers.ts.
+    mdrSubmissionStatus: { type: String, enum: ["submitted", "failed"], default: "failed", index: true },
     mdrError: String,
   },
   { timestamps: true }

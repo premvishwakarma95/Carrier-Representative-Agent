@@ -42,7 +42,12 @@ export const dispatchRouter = Router();
 
 type Result = Record<string, unknown>;
 
-dispatchRouter.post("/run", async (_req, res) => {
+dispatchRouter.post("/run", async (req, res) => {
+  // ?dryRun=true runs the exact same eligibility/cadence/window pipeline
+  // against real data but stops just short of creating a CallAttempt or
+  // touching Vapi — reports "would_dial" instead. Lets the whole decision
+  // engine be verified against real carriers with zero side effects.
+  const dryRun = req.query.dryRun === "true" || req.query.dryRun === "1";
   const results: Result[] = [];
 
   // Top-level guard: even a failure before any load-specific work starts
@@ -60,7 +65,7 @@ dispatchRouter.post("/run", async (_req, res) => {
 
   for (const load of loads) {
     try {
-      await processLoad(load, results);
+      await processLoad(load, results, dryRun);
     } catch (err) {
       // Should be unreachable — processLoad has its own internal handling —
       // but if something still escapes it, this load's failure must not
@@ -76,10 +81,10 @@ dispatchRouter.post("/run", async (_req, res) => {
     return acc;
   }, {});
 
-  res.status(200).json({ ok: true, summary, results });
+  res.status(200).json({ ok: true, dryRun, summary, results });
 });
 
-async function processLoad(load: any, results: Result[]) {
+async function processLoad(load: any, results: Result[], dryRun: boolean) {
   let carriers;
   try {
     carriers = await Carrier.find({ load_id: load.id, stop_call: false }).sort({ rank: 1 });
@@ -91,7 +96,7 @@ async function processLoad(load: any, results: Result[]) {
 
   for (const carrier of carriers) {
     try {
-      const stop = await processCarrier(load, carrier, results);
+      const stop = await processCarrier(load, carrier, results, dryRun);
       if (stop) return; // load was closed — abandon the rest of this load's carriers
     } catch (err) {
       // Same belt-and-suspenders as the load-level catch above — processCarrier
@@ -112,7 +117,7 @@ async function processLoad(load: any, results: Result[]) {
 }
 
 /** Returns true if the load was found closed and the caller should stop processing it further. */
-async function processCarrier(load: any, carrier: any, results: Result[]): Promise<boolean> {
+async function processCarrier(load: any, carrier: any, results: Result[], dryRun: boolean): Promise<boolean> {
   let fresh;
   try {
     fresh = await getSpecificCarrier(load.id, carrier.carrier_id);
@@ -146,6 +151,16 @@ async function processCarrier(load: any, carrier: any, results: Result[]): Promi
       return true;
     }
     results.push({ loadId: load.id, outcome: "load_closed_skipping_rest" });
+    return true;
+  }
+
+  // Quote threshold met (e.g. 3 quotes in) is its own stop condition,
+  // distinct from is_load_close — MDR may not flip is_load_close the
+  // instant the threshold is hit, so this can't be inferred from that flag
+  // alone. Re-checked fresh every run just like is_load_close, since
+  // nothing about it is cached locally.
+  if (fresh.response_summary?.threshold_reached) {
+    results.push({ loadId: load.id, outcome: "quote_threshold_reached_skipping_rest" });
     return true;
   }
 
@@ -261,6 +276,23 @@ async function processCarrier(load: any, carrier: any, results: Result[]): Promi
   const phone = fresh.carrier.phone;
   if (!phone) {
     results.push({ loadId: load.id, outreachId: carrier.outreach_id, outcome: "no_phone_number" });
+    return false;
+  }
+
+  if (dryRun) {
+    // Every check above (threshold, stop_call, timezone, email_sent_at,
+    // attempt count, cadence due-time, calling window, phone/config
+    // presence) has already run for real — this is the one point where a
+    // live run would create a CallAttempt and dial. Report what would have
+    // happened instead, with zero DB writes and no Vapi call.
+    results.push({
+      loadId: load.id,
+      outreachId: carrier.outreach_id,
+      outcome: "would_dial",
+      attemptNumber: nextAttemptNumber,
+      scheduledFor: scheduledFor.toISOString(),
+      phone,
+    });
     return false;
   }
 

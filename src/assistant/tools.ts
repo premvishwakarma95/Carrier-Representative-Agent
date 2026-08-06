@@ -41,103 +41,77 @@ const DECLINE_REASONS = [
   "other",
 ] as const;
 
-const accessorialLineItem = {
-  type: "object",
-  properties: {
-    name: { type: "string", description: "e.g. detention, overweight, pre-pull, tolls" },
-    amount: { type: "number" },
-    unit: { type: "string", description: "e.g. flat, per hour, per day, percentage" },
-    trigger: { type: "string", description: "condition under which this charge applies" },
+// Shared by calculate_quote and submit_quote — MDR's call-result and
+// call-final-result endpoints take the same fields (see src/mdr/api.ts).
+// all_in is deliberately not here: it's derived server-side from whether
+// acc_types is empty, not something Everly asks about or states.
+const quoteFieldProperties = {
+  base_rate: {
+    type: "number",
+    description:
+      "base drayage rate — pickup to warehouse if this load needs storage, otherwise pickup to " +
+      "final delivery",
   },
-  required: ["name", "amount"],
+  fsc: { type: "number", description: "fuel surcharge, as a percentage" },
+  acc_types: {
+    type: "array",
+    items: { type: "number" },
+    description:
+      "ids of every accessorial that applies — existing matched ids plus any newly registered via " +
+      "add_accessorial. Empty array if none.",
+  },
+  transload_rate: { type: "number", description: "only if this load needs storage" },
+  finalmile_rate: { type: "number", description: "only if this load needs storage" },
+  finalmile_fsc: { type: "number", description: "only if this load needs storage" },
+  is_warehouse: { type: "number", enum: [0, 1], description: "1 if this load needs storage, 0 otherwise" },
+  storage_rate: { type: "number", description: "only if this load needs storage" },
+  warehouse_id: {
+    type: "number",
+    description: "only if this load needs storage — existing matched id or one newly registered via add_warehouse",
+  },
+  rate_valid_until: { type: "string", description: "date, e.g. 2026-12-31" },
+  driver_available: { type: "string", description: "date, e.g. 2026-08-15" },
+  details: { type: "string", description: "free-text notes, if any" },
 };
+
+const quoteFieldRequired = ["base_rate", "fsc", "acc_types", "is_warehouse", "rate_valid_until", "driver_available"];
 
 export const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "calculate_quote",
+      description:
+        "Send the carrier's stated pricing to MDR to get the calculated total back. Call this once " +
+        "you've collected every applicable field — the result includes MDR's calculated total, " +
+        "which is what gets read back to the carrier for confirmation, not anything you compute " +
+        "yourself. Safe to call again if the carrier wants to change something before confirming.",
+      parameters: {
+        type: "object",
+        properties: quoteFieldProperties,
+        required: quoteFieldRequired,
+      },
+    },
+    server: { url: ORCHESTRATION_WEBHOOK_URL },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "submit_quote",
       description:
-        "Submit a carrier's confirmed quote. Only call after reading the quote back and " +
-        "receiving explicit verbal confirmation from the carrier.",
+        "Finalize and submit the quote to MDR. Only call after the carrier has explicitly " +
+        "confirmed the calculated total that calculate_quote returned — restate every field exactly " +
+        "as sent to calculate_quote.",
       parameters: {
         type: "object",
         properties: {
-          serviceScope: {
-            type: "string",
-            enum: ["drayage", "drayage_transload", "drayage_final_mile", "combined"],
-          },
-          baseRate: { type: "number" },
-          fuelSurcharge: {
-            type: "object",
-            properties: {
-              amount: { type: "number" },
-              includedInBase: { type: "boolean" },
-            },
-          },
-          chassis: {
-            type: "object",
-            properties: {
-              amount: { type: "number" },
-              includedInBase: { type: "boolean" },
-              source: { type: "string", enum: ["carrier_supplied", "customer_supplied"] },
-            },
-          },
-          accessorials: { type: "array", items: accessorialLineItem },
-          freeTime: { type: "string", description: "e.g. '2 hours loading/unloading'" },
-          detentionRate: { type: "number" },
-          totalEstimatedAllIn: { type: "number" },
-          capacity: { type: "string", description: "e.g. '2 containers/day'" },
-          rateValidUntil: { type: "string", description: "ISO date/time" },
-          transload: {
-            type: "object",
-            description: "Only if serviceScope includes transload",
-            properties: {
-              facilityName: { type: "string" },
-              facilityAddress: { type: "string" },
-              carrierOperated: { type: "boolean" },
-              unloadCharge: { type: "number" },
-              accessorials: { type: "array", items: accessorialLineItem },
-            },
-          },
-          warehouseStorage: {
-            type: "object",
-            description: "Only if storage was selected within transload scope",
-            properties: {
-              ratePerPalletPerDay: { type: "number" },
-              ratePerPalletPerMonth: { type: "number" },
-              freeDays: { type: "number" },
-              freeDaysBasis: { type: "string", enum: ["calendar", "business"] },
-              billingStartTrigger: { type: "string" },
-              minimumCharge: { type: "string" },
-            },
-          },
-          finalMile: {
-            type: "object",
-            description: "Only if serviceScope includes final mile",
-            properties: {
-              baseRate: { type: "number" },
-              equipmentType: { type: "string" },
-              accessorials: { type: "array", items: accessorialLineItem },
-            },
-          },
-          isConditional: {
-            type: "boolean",
-            description: "true if any detail was unknown/assumed and the quote is conditional on it",
-          },
-          conditionalOn: { type: "string", description: "what the quote is conditional on, if applicable" },
+          ...quoteFieldProperties,
           carrierConfirmedReadBack: {
             type: "boolean",
-            description: "must be true — the carrier explicitly confirmed the quote read-back",
+            description: "must be true — the carrier explicitly confirmed the calculated total read-back",
           },
         },
-        required: [
-          "serviceScope",
-          "baseRate",
-          "totalEstimatedAllIn",
-          "rateValidUntil",
-          "carrierConfirmedReadBack",
-        ],
+        required: [...quoteFieldRequired, "carrierConfirmedReadBack"],
       },
     },
     server: { url: ORCHESTRATION_WEBHOOK_URL },
@@ -177,27 +151,6 @@ export const TOOLS = [
   {
     type: "function" as const,
     function: {
-      name: "escalate_to_human",
-      description:
-        "Hand off to a human — negotiation beyond asking for best rate, legal/compliance " +
-        "questions, identity disputes, unusual equipment, aggressive callers, unresolved rate " +
-        "contradictions, tool failures, or explicit carrier request.",
-      parameters: {
-        type: "object",
-        properties: {
-          reason: { type: "string" },
-          capturedQuestion: { type: "string" },
-          preferredContactMethod: { type: "string", enum: ["phone", "email"] },
-          liveTransferOffered: { type: "boolean" },
-        },
-        required: ["reason"],
-      },
-    },
-    server: { url: ORCHESTRATION_WEBHOOK_URL },
-  },
-  {
-    type: "function" as const,
-    function: {
       name: "record_do_not_call",
       description:
         "Record an opt-out immediately when a carrier asks to not be contacted. Call this " +
@@ -215,16 +168,49 @@ export const TOOLS = [
   {
     type: "function" as const,
     function: {
-      name: "update_contact",
-      description: "Record a corrected contact name/phone/email, or a stated carrier preference.",
+      name: "resend_email",
+      description:
+        "Resend the load invitation email to this carrier. Call when the carrier says they never " +
+        "received it, or otherwise asks for it again.",
+      parameters: { type: "object", properties: {} },
+    },
+    server: { url: ORCHESTRATION_WEBHOOK_URL },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "add_accessorial",
+      description:
+        "Register a new accessorial charge the carrier named that isn't already in their known " +
+        "accessorial list. Only call for a genuinely new one — if what the carrier said matches an " +
+        "existing accessorial, use that existing one instead of calling this. If unsure whether it " +
+        "matches, confirm with the carrier before deciding.",
       parameters: {
         type: "object",
         properties: {
-          correctedName: { type: "string" },
-          correctedPhone: { type: "string" },
-          correctedEmail: { type: "string" },
-          preference: { type: "string", description: "e.g. 'email only', 'no brokers'" },
+          name: { type: "string", description: "the accessorial's name, as the carrier stated it" },
+          price: { type: "number" },
         },
+        required: ["name", "price"],
+      },
+    },
+    server: { url: ORCHESTRATION_WEBHOOK_URL },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "add_warehouse",
+      description:
+        "Register a new warehouse address the carrier named that isn't already in their known " +
+        "warehouse list. Only call for a genuinely new one — if what the carrier said matches an " +
+        "existing warehouse, use that existing one instead of calling this. If unsure whether it " +
+        "matches, confirm with the carrier before deciding.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string" },
+        },
+        required: ["address"],
       },
     },
     server: { url: ORCHESTRATION_WEBHOOK_URL },
