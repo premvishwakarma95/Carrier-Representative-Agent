@@ -1,74 +1,80 @@
 /**
- * Receiver for MDR's push webhook (confirmed on the 2026-07-20 client call).
- * MDR calls this ~30 minutes after a carrier invitation email goes out, with
- * the load, invited carriers (id + do-not-call), and account settings all in
- * one payload — that 30-minute gap means the email-wait window has already
- * elapsed by the time this fires, so cadence.ts treats `receivedAt` as
- * attempt-1's baseline directly rather than adding emailWaitMinutes again.
+ * Receiver for MDR's real push webhook. Still raw-capturing everything as-is
+ * into WebhookResponse (unchanged — kept as the safety net so no traffic is
+ * ever lost, even if the structured extraction below has a bug or MDR
+ * changes the shape). On top of that:
+ *  1. Extracts `load` and upserts a structured Load record — see
+ *     src/db/models/Load.ts for why field names mirror MDR's payload
+ *     exactly.
+ *  2. Calls MDR's real "Get All Carriers" endpoint for that load and upserts
+ *     each carrier — see src/db/models/Carrier.ts / src/mdr/api.ts.
  *
- * Until MDR's real system exists, src/mdr-simulator-ui/ POSTs here directly
- * to stand in for it.
+ * Upsert (not insert) throughout, not blind create: MDR has been observed
+ * sending the same load.posted webhook twice for the same load a couple
+ * minutes apart (confirmed via real captured WebhookResponse data,
+ * 2026-08-05) — a plain create() would produce duplicates.
+ *
+ * Neither extraction step blocks the raw capture above or the 200 response
+ * to MDR — the WebhookResponse write already succeeded by that point, and we
+ * don't want MDR retrying indefinitely over a bug or a live-API hiccup on
+ * our side.
+ *
+ * No auth check yet — MDR's real signing/auth scheme for this webhook isn't
+ * confirmed, and rejecting on a guessed scheme would silently drop real
+ * capture data during this discovery phase.
+ *
+ * The old /load-ready route (built against the previous mock-based
+ * push-webhook design, fed only by the now-deleted src/mdr-simulator-ui/) has
+ * been removed — MDR's real webhook posts here instead.
  */
 import { Router } from "express";
-import { Load, WebhookResponse } from "../db/models/index.js";
-
-const WEBHOOK_SECRET = process.env.MDR_WEBHOOK_SECRET ?? "mock-webhook-secret";
+import { Carrier, Load, WebhookResponse } from "../db/models/index.js";
+import { getAllCarriers } from "../mdr/api.js";
 
 export const mdrWebhookRouter = Router();
 
-/**
- * Raw-capture endpoint for MDR's real webhook (new draft docs: "load.posted"
- * event, shape not yet confirmed/built against — see CLAUDE.md). Stores
- * whatever is sent as-is in WebhookResponse, unparsed, so real traffic can be
- * inspected before the Load model and orchestration flow get rebuilt against
- * the confirmed payload shape. No auth check yet — MDR's real signing/auth
- * scheme for this webhook isn't confirmed, and rejecting on a guessed scheme
- * would silently drop real capture data during this discovery phase.
- */
 mdrWebhookRouter.post("/capture", async (req, res) => {
-  await WebhookResponse.create({ timestamp: new Date(), data: req.body });
+  // This is the very first thing that runs on every real MDR delivery — if
+  // it throws unguarded, the rejection is unhandled and (default Node
+  // behavior since v15) takes down the whole process, not just this
+  // request. Everything below the raw capture is already individually
+  // guarded; this closes the one gap before that.
+  try {
+    await WebhookResponse.create({ timestamp: new Date(), data: req.body });
+  } catch (err) {
+    console.error("webhook capture: failed to write raw WebhookResponse:", err);
+    res.status(500).json({ ok: false, error: "Failed to record webhook" });
+    return;
+  }
+
   res.status(200).json({ ok: true });
-});
 
-mdrWebhookRouter.post("/load-ready", async (req, res) => {
-  const auth = req.header("authorization");
-  if (auth !== `Bearer ${WEBHOOK_SECRET}`) {
-    res.status(401).json({ error: "Missing or invalid Authorization header" });
+  const load = req.body?.load;
+  if (!load?.id) {
+    console.warn("webhook capture: no load.id present, skipping Load extraction");
     return;
   }
 
-  const { load, invitedCarriers, settings } = req.body ?? {};
-
-  if (!load?.id || !load?.accountId || !Array.isArray(invitedCarriers) || !settings) {
-    res.status(400).json({ error: "Payload must include load, invitedCarriers[], and settings" });
+  try {
+    await Load.findOneAndUpdate({ id: load.id }, load, { upsert: true, setDefaultsOnInsert: true });
+  } catch (err) {
+    console.error(`webhook capture: failed to extract/upsert Load ${load.id}:`, err);
     return;
   }
 
-  const doc = await Load.findOneAndUpdate(
-    { id: load.id },
-    {
-      id: load.id,
-      externalId: load.externalId,
-      accountId: load.accountId,
-      equipment: load.equipment,
-      routing: load.routing,
-      timing: load.timing,
-      cargo: load.cargo,
-      serviceScope: load.serviceScope,
-      operationalAssumptions: load.operationalAssumptions,
-      pricingRules: load.pricingRules,
-      disclosureSettings: load.disclosureSettings,
-      warehouseStorage: load.warehouseStorage,
-      quoteThreshold: load.quoteThreshold,
-      bidCloseAt: load.bidCloseAt,
-      invitedCarriers,
-      settings,
-      status: "open",
-      receivedAt: new Date(),
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
-
-  console.log(`Received load-ready webhook for load ${doc.id} — ${invitedCarriers.length} invited carriers`);
-  res.status(200).json({ ok: true, loadId: doc.id });
+  try {
+    const { carriers } = await getAllCarriers(load.id);
+    await Promise.all(
+      carriers.map((carrier) =>
+        Carrier.findOneAndUpdate(
+          { outreach_id: carrier.outreach_id },
+          { ...carrier, load_id: load.id },
+          { upsert: true, setDefaultsOnInsert: true }
+        )
+      )
+    );
+    console.log(`webhook capture: upserted ${carriers.length} carrier(s) for load ${load.id}`);
+  } catch (err) {
+    console.error(`webhook capture: failed to fetch/upsert carriers for load ${load.id}:`, err);
+  }
 });

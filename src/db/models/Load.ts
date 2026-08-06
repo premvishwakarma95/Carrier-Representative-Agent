@@ -1,76 +1,54 @@
-import { Schema, model } from "mongoose";
-import type { MdrLoad, MdrAccountSettings } from "../../mdr/api.js";
-
-/** Shape of a locally-persisted Load doc — MdrLoad's fields plus what only exists locally. */
-export interface LocalLoad extends MdrLoad {
-  invitedCarriers: Array<{ carrierId: string; doNotCall: boolean }>;
-  settings: MdrAccountSettings;
-  status: "open" | "closed";
-  receivedAt: Date;
-}
-
 /**
- * Local cache of a load, populated entirely from MDR's push webhook
- * (POST /webhooks/mdr/load-ready — see src/server/mdrWebhook.ts). Brought
- * back after the 2026-07-20 client call confirmed there is no GET /loads or
- * GET /loads/{id} in MDR's real API — load details only ever arrive via that
- * webhook, so we have to persist them ourselves or lose them the moment the
- * request completes. Carrier and quote data stay API-only (src/mdr/api.ts),
- * since those DO have live, re-fetchable endpoints.
+ * Local Load record, extracted from MDR's real load.posted webhook
+ * (POST /webhooks/mdr/capture — see src/server/mdrWebhook.ts). Field names
+ * mirror MDR's payload exactly, no renaming — see the real captured example
+ * in WebhookResponse for the source of truth this was built against.
  *
- * `status` is our own local tracking, not something MDR pushes updates for —
- * synced opportunistically from GET /loads/{id}/quote-status's `allowCalling`
- * flag (see stopConditions.ts and dispatcher.ts's pre-dial check).
+ * Types match what MDR actually sends, not what their docs claim: quantity,
+ * cargo_weight, and target_rate all arrive as strings despite being
+ * documented as integer/number/decimal, so they're modeled as strings here
+ * rather than force-coerced. id/quote_id/distance arrive as real numbers.
+ *
+ * `id` (MDR's internal load id, e.g. 962) is the unique lookup key — it's
+ * what MDR's own API URLs are scoped by (see the webhook's `api.all_carriers`
+ * link). `quote_id` is a separate field — the carrier-facing reference number
+ * ("Quote Request #10796") Everly states on calls, not used for lookups.
  */
+import { Schema, model } from "mongoose";
+
 const loadSchema = new Schema(
   {
-    id: { type: String, required: true, unique: true, index: true }, // MDR's load id
-    externalId: String,
-    accountId: { type: String, required: true, index: true },
-
-    equipment: Schema.Types.Mixed,
-    routing: Schema.Types.Mixed,
-    timing: Schema.Types.Mixed,
-    cargo: Schema.Types.Mixed,
-    serviceScope: {
-      type: String,
-      enum: ["drayage", "drayage_transload", "drayage_final_mile", "combined"],
-      required: true,
-    },
-    operationalAssumptions: Schema.Types.Mixed,
-    pricingRules: Schema.Types.Mixed,
-    disclosureSettings: Schema.Types.Mixed,
-    warehouseStorage: Schema.Types.Mixed,
-    quoteThreshold: { type: Number, required: true },
-    bidCloseAt: String,
-
-    // Invited carriers as pushed by MDR — id + do-not-call only. Full
-    // profile is fetched fresh per carrier via getCarrierForLoad() since
-    // that also confirms current do-not-call/quoted status at call time.
-    invitedCarriers: [
-      {
-        _id: false,
-        carrierId: { type: String, required: true },
-        doNotCall: { type: Boolean, default: false },
-      },
-    ],
-
-    // Account settings snapshot from the webhook payload — no separate
-    // settings-fetch endpoint exists in MDR's confirmed API, so this is
-    // authoritative for this load's lifecycle until MDR's promised refresh
-    // API exists (see requirements-tracker.md).
-    settings: {
-      quoteThreshold: Number,
-      emailWaitMinutes: Number,
-      maxCallAttempts: Number,
-      callingWindow: { days: [String], startHour: Number, endHour: Number },
-      voicemailPolicy: { allowed: Boolean },
-      disclosurePolicy: { aiDisclosureRequired: Boolean, wording: String },
-      negotiationAuthority: String,
-    },
-
-    status: { type: String, enum: ["open", "closed"], default: "open", index: true },
-    receivedAt: { type: Date, required: true }, // when MDR's webhook arrived — the email-wait window has already elapsed by this point
+    id: { type: Number, required: true, unique: true, index: true },
+    quote_id: { type: Number, required: true },
+    distance: Number,
+    origin_metro_location: String,
+    origin_service_location: String,
+    lfd_cut: String,
+    load_available_date: String,
+    customer_name: String,
+    customer_location: String,
+    length: String,
+    quantity: String,
+    shipment_type: String,
+    ssl: String,
+    commodity: String,
+    cargo_weight: String,
+    hazmat: Boolean,
+    reefer: Boolean,
+    target_rate: String,
+    notes: String,
+    frequency_status: String,
+    freight_status: String,
+    is_load_close: Boolean,
+    service_type: String,
+    // Only present when service_type includes transloading (per the API
+    // doc's own note: drayage-only loads omit these entirely rather than
+    // sending null) — confirmed via a real capture with
+    // service_type "Drayage + Transloading + Final Mile" (2026-08-05).
+    storage_needed: Boolean,
+    storage_days: Number,
+    storage_pallets: Number,
+    created_at: String,
   },
   { timestamps: true }
 );

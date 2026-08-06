@@ -9,14 +9,16 @@
  * arguments (see comment in src/assistant/tools.ts) — they're resolved here
  * from the CallAttempt matching the webhook's vapiCallId instead.
  *
- * Quotes and do-not-call flags are written to MDR (src/mdr/api.ts — mock
- * today, real once the client builds it), since those are the two write
- * endpoints the client's API actually covers. Everything else (declines,
- * callbacks, escalations) has no MDR equivalent and stays local only.
+ * PENDING REBUILD (2026-08-05): the old orchestration/ and mdr/ layers were
+ * deleted as step one of rebuilding against MDR's new outreach_id-based API
+ * (see CLAUDE.md / project memory). This file is temporarily stubbed just
+ * enough to keep compiling and keep the kept webhook receiver
+ * (/webhooks/mdr/capture) alive — MDR write-backs (submit_quote,
+ * record_do_not_call) and the stop-condition re-check are DISABLED right
+ * now, local-only writes still happen. Do not treat this as the real
+ * implementation; it's a placeholder until the new flow replaces it.
  */
 import { CallAttempt, Escalation, Quote } from "../db/models/index.js";
-import { checkStopConditions } from "../orchestration/stopConditions.js";
-import { submitQuote as submitQuoteToMdr, updateDoNotCall } from "../mdr/api.js";
 import { applyCallOutcome } from "./callOutcome.js";
 import type { HydratedDocument } from "mongoose";
 
@@ -75,10 +77,6 @@ async function dispatchTool(name: string, params: Record<string, any>, context: 
 }
 
 async function submitQuote(params: any, { attempt }: CallContext) {
-  const isComplete = Boolean(
-    params.carrierConfirmedReadBack && params.baseRate != null && params.totalEstimatedAllIn != null
-  );
-
   const quotePayload = {
     serviceScope: params.serviceScope,
     baseRate: params.baseRate,
@@ -98,8 +96,9 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     carrierConfirmedReadBack: Boolean(params.carrierConfirmedReadBack),
   };
 
-  // Written before the MDR call so there's proof of exactly what was
-  // captured even if the MDR submission below fails.
+  // Local audit copy only for now — the MDR write-back (submitQuoteToMdr) is
+  // disabled pending the rebuild against the new outreach_id-based API. See
+  // the PENDING REBUILD note at the top of this file.
   const localQuote = await Quote.create({
     loadId: attempt.loadId,
     carrierId: attempt.carrierId,
@@ -108,27 +107,10 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     mdrSubmissionStatus: "failed",
   });
 
-  const quote = await submitQuoteToMdr(attempt.loadId, { carrierId: attempt.carrierId, ...quotePayload }).catch(
-    async (err) => {
-      localQuote.mdrError = (err as Error).message;
-      await localQuote.save();
-      throw err;
-    }
-  );
-
-  localQuote.mdrQuoteId = quote.id;
-  localQuote.mdrStatus = quote.status;
-  localQuote.mdrSubmissionStatus = "submitted";
-  await localQuote.save();
-
   attempt.callResult = params.isConditional ? "conditional_quote" : "quote_received";
   await attempt.save();
 
-  if (isComplete) {
-    await checkStopConditions(attempt.loadId);
-  }
-
-  return { ok: true, quoteId: quote.id, status: quote.status };
+  return { ok: true, quoteId: localQuote.id, status: "pending_review", note: "MDR write-back pending rebuild" };
 }
 
 async function logDecline(params: any, { attempt }: CallContext) {
@@ -165,15 +147,16 @@ async function escalateToHuman(params: any, { attempt }: CallContext) {
 }
 
 async function recordDoNotCall(params: any, { attempt }: CallContext) {
-  await updateDoNotCall(attempt.carrierId, {
-    scope: params.scope === "calls_and_email" ? "calls_and_email" : "calls_only",
-    updatedBy: "everly-system",
-  });
+  // MDR write-back (updateDoNotCall) disabled pending rebuild — see the
+  // PENDING REBUILD note at the top of this file. Local-only for now.
+  console.warn(
+    `record_do_not_call for carrier ${attempt.carrierId} (scope: ${params.scope}) — MDR write-back pending rebuild, recorded locally only`
+  );
 
   attempt.callResult = "do_not_call";
   await attempt.save();
 
-  return { ok: true };
+  return { ok: true, note: "MDR write-back pending rebuild" };
 }
 
 async function updateContact(params: any, { attempt }: CallContext) {
@@ -202,5 +185,6 @@ export async function handleEndOfCallReport(message: any) {
   });
 
   await attempt.save();
-  await checkStopConditions(attempt.loadId);
+  // Stop-condition re-check disabled pending rebuild — see the PENDING
+  // REBUILD note at the top of this file.
 }

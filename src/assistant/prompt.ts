@@ -23,9 +23,9 @@ export const FIRST_MESSAGE =
 
 export const VOICEMAIL_MESSAGE =
   "Hi, this is Everly, an AI assistant calling on behalf of MDR, My Dray Rate, regarding a drayage bid " +
-  "from {{origin}} to {{destination}}. MDR sent the details to {{carrierEmail}}, and the bid closes " +
-  "{{bidCloseTime}}. You can submit pricing through the email, or call us back at {{callbackNumber}} " +
-  "and reference bid {{bidId}}. Again, this is Everly with MDR at {{callbackNumber}}.";
+  "from {{origin}} to {{destination}}. MDR sent the details to {{carrierEmail}}. You can submit pricing " +
+  "through the email, or call us back at {{callbackNumber}} and reference quote {{quoteId}}. Again, this " +
+  "is Everly with MDR at {{callbackNumber}}.";
 
 export const SYSTEM_PROMPT = `
 # Identity
@@ -157,16 +157,18 @@ assistant. If asked directly whether you are AI, confirm honestly and plainly.
 
 # Load details for this call
 
-- Load/bid ID: {{loadId}}
+- Quote ID: {{quoteId}} (always state this reference number to the carrier — they can use it to reference
+  this load in the future)
+- Load ID: {{loadId}}
 - Equipment: {{equipmentDescription}}
 - Route: pickup {{pickupLocation}}, delivery {{deliveryLocation}}, approx. {{miles}} miles
+- Shipment type: {{shipmentType}}
 - Cargo: {{commodity}}, weight {{weight}}
-- Timing: pickup {{pickupTiming}}, delivery {{deliveryWindow}}, last free day {{lastFreeDay}}
-- Operation: {{liveOrDrop}}, free time {{freeTime}}, chassis {{chassisRequirement}}
+- Timing: pickup {{pickupTiming}}, last free day {{lastFreeDay}}
 - Volume: {{containerQuantity}} containers, {{frequency}}
-- Service scope: {{serviceScope}} (drayage / drayage+transload / drayage+final-mile / combined)
+- Service scope: {{serviceScope}}
+- Target rate: {{targetRate}}
 - Special requirements: {{specialRequirements}}
-- Bid closes: {{bidCloseTime}}
 
 # Call flow
 

@@ -1,169 +1,122 @@
 /**
- * Typed functions for each MDR API operation (mock today, real once the
- * client builds it — see src/mock-mdr-api/ and requirements-tracker.md).
+ * Typed functions for MDR's real Voice API endpoints, confirmed against
+ * live staging responses (see project memory / CLAUDE.md for the full
+ * endpoint list). Only "Get All Carriers" is implemented so far — the rest
+ * (call-result, call-final-result, decline, stop, email-resend,
+ * add-accessorials, add-warehouse, get-specific-carrier) come as directed.
  *
- * As of the 2026-07-20 client call, MDR's integration is push-based, not
- * pull-based: MDR calls OUR webhook (src/server/mdrWebhook.ts) ~30 minutes
- * after a carrier invitation goes out, with the load, invited carriers
- * (id + do-not-call only — full profile requires the per-load carrier
- * lookup below), and account settings all in one payload. There is no
- * GET /loads or GET /loads/{id} in the client's confirmed API — load details
- * only ever arrive via that webhook, which is why we now persist them
- * locally (src/db/models/Load.ts) instead of re-fetching. The 4 confirmed
- * read/write APIs below are the only ones MDR will actually expose.
+ * Endpoint method is unconfirmed (the doc's own table says GET, its detail
+ * section header says POST) — using GET per the table; trivial to swap if
+ * that turns out wrong.
  */
 import { mdr } from "./client.js";
 
-export interface MdrLoad {
-  id: string;
-  externalId: string;
-  accountId: string;
-  equipment: {
-    containerSize?: string;
-    containerType?: string;
-    chassisRequired?: boolean;
-    overweight?: boolean;
-    hazmat?: boolean;
-    reefer?: boolean;
-    [key: string]: unknown;
-  };
-  routing: {
-    portOrRailRamp?: string;
-    pickupTerminal?: string;
-    deliveryCity?: string;
-    deliveryState?: string;
-    deliveryZip?: string;
-    miles?: number;
-    [key: string]: unknown;
-  };
-  timing: {
-    earliestPickup?: string;
-    lastFreeDay?: string;
-    deliveryWindowStart?: string;
-    deliveryWindowEnd?: string;
-    bidExpiration?: string;
-    [key: string]: unknown;
-  };
-  cargo: {
-    commodity?: string;
-    grossWeight?: number;
-    [key: string]: unknown;
-  };
-  serviceScope: "drayage" | "drayage_transload" | "drayage_final_mile" | "combined";
-  operationalAssumptions: {
-    liveOrDrop?: "live" | "drop";
-    freeTime?: string;
-    chassisSource?: string;
-    containerQuantity?: number;
-    frequency?: "one_time" | "daily" | "weekly";
-    [key: string]: unknown;
-  };
-  pricingRules: { lineItemOrAllIn?: string; currency?: string; [key: string]: unknown };
-  disclosureSettings: {
-    aiDisclosureRequired?: boolean;
-    recordingDisclosureRequired?: boolean;
-    shareBrokerIdentity?: boolean;
-    firmOrForecasted?: string;
-  };
-  warehouseStorage?: Record<string, unknown>;
-  quoteThreshold: number;
-  bidCloseAt?: string;
-}
-
-export interface MdrCarrierContact {
-  name?: string;
-  phone?: string;
-  email?: string;
-  role?: string;
-  preferredMethod?: "phone" | "email";
+export interface MdrCallingWindow {
+  startingTime: string;
+  endTime: string;
 }
 
 export interface MdrCarrier {
-  id: string;
-  legalName: string;
-  dba?: string;
-  mcNumber?: string;
-  usdotNumber?: string;
-  contacts: MdrCarrierContact[];
-  timezone: string;
-  eligibility: {
-    approvedAuthority: boolean;
-    approvedInsurance: boolean;
-    approvedEquipment: string[];
-    approvedGeography: string[];
-    safetyStatus: "ok" | "flagged" | "unknown";
-    fraudFlag: boolean;
-  };
-  serviceHistory: { laneCount?: number; lastServiceDate?: string };
-  doNotCall: {
-    calls: boolean;
-    email: boolean;
-    reason?: string;
-    source?: string;
-    updatedBy?: string;
-    recordedAt?: string | null;
-  };
+  outreach_id: number;
+  carrier_id: number;
+  rank: number;
+  carrier_timezone: string;
+  calling_window: MdrCallingWindow;
+  company_name: string;
+  contact_name: string;
+  email: string;
+  phone: string;
+  email_sent: boolean;
+  email_sent_at: string;
+  stop_call: boolean;
+  stop_reason: string | null;
 }
 
-/** Result of the per-(carrier, load) lookup — carrier profile plus whether they've already quoted this specific load. */
-export interface MdrCarrierForLoad extends MdrCarrier {
-  hasQuoted: boolean;
+export interface MdrResponseSummary {
+  threshold: number;
+  total_carriers: number;
+  responses_received: number;
+  responses_remaining: number;
+  threshold_reached: boolean;
 }
 
-export interface MdrQuote {
-  id: string;
-  loadId: string;
-  carrierId: string;
-  carrierEmail?: string;
-  source: "everly" | "email";
-  serviceScope: string;
-  baseRate: number;
-  totalEstimatedAllIn: number;
-  status: "pending_review" | "valid" | "invalid" | "superseded";
-  submittedAt: string;
-  [key: string]: unknown;
+export interface MdrGetAllCarriersResponse {
+  is_load_close: boolean;
+  response_summary: MdrResponseSummary;
+  batch: number;
+  batch_size: number;
+  carriers: MdrCarrier[];
 }
 
-export interface MdrQuoteStatus {
-  loadId: string;
-  requiredThreshold: number;
-  currentValidQuoteCount: number;
-  remainingQuoteCount: number;
-  allowCalling: boolean;
+/**
+ * Fetches one batch of carriers for a load. Paginated — batch_size is 25
+ * per the real response, undocumented in either PDF. Callers needing the
+ * full list should keep incrementing `batch` until they've collected
+ * response_summary.total_carriers carriers.
+ */
+export function getAllCarriersBatch(loadId: number, batch = 1): Promise<MdrGetAllCarriersResponse> {
+  return mdr.get<MdrGetAllCarriersResponse>(`/voice/load/${loadId}?batch=${batch}`);
 }
 
-export interface MdrAccountSettings {
-  accountId: string;
-  quoteThreshold: number;
-  emailWaitMinutes: number;
-  maxCallAttempts: number;
-  callingWindow: { days: string[]; startHour: number; endHour: number };
-  voicemailPolicy: { allowed: boolean };
-  disclosurePolicy: { aiDisclosureRequired: boolean; wording: string };
-  negotiationAuthority: string;
+const MAX_CARRIER_BATCHES = 200; // 200 * batch_size(25) = 5000 carriers — far above any real load, just a runaway-loop backstop
+
+/** Fetches every carrier for a load, looping through all batches. */
+export async function getAllCarriers(loadId: number): Promise<MdrGetAllCarriersResponse> {
+  const first = await getAllCarriersBatch(loadId, 1);
+  const carriers = [...first.carriers];
+
+  // total_carriers has been unreliable enough elsewhere in this API (string
+  // vs number type mismatches on other fields) that a missing/non-numeric
+  // value here shouldn't be trusted to drive a loop condition — treat it as
+  // "just this first batch" instead of looping on NaN comparisons forever.
+  const totalCarriers = Number(first.response_summary?.total_carriers);
+  if (!Number.isFinite(totalCarriers)) {
+    console.warn(`getAllCarriers: missing/invalid total_carriers for load ${loadId}, returning first batch only`);
+    return first;
+  }
+
+  let batch = 1;
+  while (carriers.length < totalCarriers && first.carriers.length > 0) {
+    if (batch >= MAX_CARRIER_BATCHES) {
+      console.error(`getAllCarriers: hit ${MAX_CARRIER_BATCHES}-batch safety cap for load ${loadId} — returning ${carriers.length}/${totalCarriers} carriers`);
+      break;
+    }
+    batch += 1;
+    const next = await getAllCarriersBatch(loadId, batch);
+    if (next.carriers.length === 0) break;
+    carriers.push(...next.carriers);
+  }
+
+  return { ...first, carriers };
 }
 
-// The 4 APIs MDR confirmed on the 2026-07-20 client call. No load-discovery
-// or bare carrier-lookup endpoints exist in the confirmed surface — loads
-// arrive via webhook (src/db/models/Load.ts), and carrier lookups are always
-// scoped to a specific load.
-
-export function getLoadQuoteStatus(loadId: string): Promise<MdrQuoteStatus> {
-  return mdr.get<MdrQuoteStatus>(`/loads/${loadId}/quote-status`);
+export interface MdrAccessorial {
+  name: string;
+  price: string;
+  id: number;
 }
 
-export function submitQuote(loadId: string, data: Record<string, unknown>): Promise<MdrQuote> {
-  return mdr.post<MdrQuote>(`/loads/${loadId}/quotes`, data);
+export interface MdrWarehouse {
+  address: string;
+  id: number;
 }
 
-/** GET /carriers/{carrier_id}/{load_id} — carrier profile + whether they've already quoted this load. */
-export function getCarrierForLoad(carrierId: string, loadId: string): Promise<MdrCarrierForLoad> {
-  return mdr.get<MdrCarrierForLoad>(`/carriers/${carrierId}/${loadId}`);
+export interface MdrCarrierDetail extends MdrCarrier {
+  accessorials: MdrAccessorial[];
+  warehouses: MdrWarehouse[];
 }
 
-export function updateDoNotCall(
-  carrierId: string,
-  data: { scope: "calls_only" | "calls_and_email"; reason?: string; updatedBy?: string }
-): Promise<MdrCarrier> {
-  return mdr.patch<MdrCarrier>(`/carriers/${carrierId}/do-not-call`, data);
+export interface MdrGetSpecificCarrierResponse {
+  is_load_close: boolean;
+  response_summary: MdrResponseSummary;
+  carrier: MdrCarrierDetail;
+}
+
+/**
+ * Fresh, single-carrier lookup — used immediately before deciding whether to
+ * call, since load/carrier state can change between when the local queue was
+ * built and now (threshold met, carrier opted out, load closed, etc.).
+ */
+export function getSpecificCarrier(loadId: number, carrierId: number): Promise<MdrGetSpecificCarrierResponse> {
+  return mdr.get<MdrGetSpecificCarrierResponse>(`/voice/load/${loadId}/carrier/${carrierId}`);
 }
