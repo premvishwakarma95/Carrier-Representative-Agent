@@ -63,7 +63,10 @@ const quoteFieldProperties = {
   transload_rate: { type: "number", description: "only if this load needs storage" },
   finalmile_rate: { type: "number", description: "only if this load needs storage" },
   finalmile_fsc: { type: "number", description: "only if this load needs storage" },
-  is_warehouse: { type: "number", enum: [0, 1], description: "1 if this load needs storage, 0 otherwise" },
+  // Vapi's schema validator rejects a numeric enum ([0, 1]) on a "number"
+  // field — enum values must be strings. Sent as "0"/"1" and coerced back
+  // to a real 0/1 server-side (see toBinaryFlag in webhookHandlers.ts).
+  is_warehouse: { type: "string", enum: ["0", "1"], description: "1 if this load needs storage, 0 otherwise" },
   storage_rate: { type: "number", description: "only if this load needs storage" },
   warehouse_id: {
     type: "number",
@@ -153,15 +156,10 @@ export const TOOLS = [
     function: {
       name: "record_do_not_call",
       description:
-        "Record an opt-out immediately when a carrier asks to not be contacted. Call this " +
-        "before anything else in the conversation once requested.",
-      parameters: {
-        type: "object",
-        properties: {
-          scope: { type: "string", enum: ["calls_only", "calls_and_email"] },
-        },
-        required: ["scope"],
-      },
+        "Record an opt-out immediately when a carrier asks not to be called again. Call this " +
+        "before anything else in the conversation once requested. Only covers calls — this system " +
+        "doesn't manage bid emails, so there's nothing to ask the carrier about scope.",
+      parameters: { type: "object", properties: {} },
     },
     server: { url: ORCHESTRATION_WEBHOOK_URL },
   },

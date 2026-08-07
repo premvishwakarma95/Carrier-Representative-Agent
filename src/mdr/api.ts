@@ -233,13 +233,29 @@ export interface MdrCallResultResponse {
 }
 
 /**
+ * MDR's staging backend throws an uncaught server-side exception (500,
+ * Laravel's default error page) when acc_types arrives as a real JSON
+ * array. Sending the exact same value as a string — "[5,6]" or "[]" for
+ * none — succeeds. Confirmed by isolation: identical payload, only this
+ * field's JSON type changed, JSON vs multipart/form-data content-type made
+ * no difference. This was the actual cause of the "call-result returns 500"
+ * finding from 2026-08-06 — not a broken endpoint on MDR's side.
+ */
+function serializeAccTypes(accTypes: number[]): string {
+  return JSON.stringify(accTypes);
+}
+
+/**
  * Doc 2.3 — call once mid-conversation, after the carrier has given their
  * rate, to get MDR's calculated total back. That calculated total (not
  * anything Everly computes herself) is what gets read back for
  * confirmation before submitCallFinalResult.
  */
 export function submitCallResult(payload: MdrCallResultRequest): Promise<MdrCallResultResponse> {
-  return mdr.post<MdrCallResultResponse>("/voice/call-result", payload);
+  return mdr.post<MdrCallResultResponse>("/voice/call-result", {
+    ...payload,
+    acc_types: serializeAccTypes(payload.acc_types),
+  });
 }
 
 export interface MdrCallFinalResultRequest extends MdrCallResultRequest {
@@ -252,5 +268,8 @@ export interface MdrCallFinalResultResponse {
 
 /** Doc 2.4 — call once, after the carrier explicitly confirms the calculated total. */
 export function submitCallFinalResult(payload: MdrCallFinalResultRequest): Promise<MdrCallFinalResultResponse> {
-  return mdr.post<MdrCallFinalResultResponse>("/voice/call-final-result", payload);
+  return mdr.post<MdrCallFinalResultResponse>("/voice/call-final-result", {
+    ...payload,
+    acc_types: serializeAccTypes(payload.acc_types),
+  });
 }

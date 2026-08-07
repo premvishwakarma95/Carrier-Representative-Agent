@@ -8,10 +8,32 @@
  * never the locally stored Carrier.calling_window.startingTime/endTime,
  * which is deliberately ignored per instruction.
  */
-const CALLING_WINDOW_START_HOUR = Number(process.env.CALLING_WINDOW_START_HOUR ?? 8);
-const CALLING_WINDOW_END_HOUR = Number(process.env.CALLING_WINDOW_END_HOUR ?? 17);
+/**
+ * `Number(process.env.X ?? fallback)` has a real gap: `??` only catches
+ * null/undefined, not an empty string — a misconfigured `.env` with a
+ * trailing `=` and no value (CALLING_WINDOW_START_HOUR=) would silently
+ * parse to 0 (midnight) instead of falling back to the intended default. A
+ * garbage non-numeric value would silently parse to NaN, which makes every
+ * calling-window comparison false — no crash, just calls that silently
+ * never go out. Both cases fall back to the given default here instead.
+ */
+function envHour(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+const CALLING_WINDOW_START_HOUR = envHour("CALLING_WINDOW_START_HOUR", 8);
+const CALLING_WINDOW_END_HOUR = envHour("CALLING_WINDOW_END_HOUR", 17);
+// Normalized to match Intl.DateTimeFormat's weekday: "short" casing ("Mon",
+// "Tue", ...) regardless of how CALLING_WINDOW_DAYS happens to be cased.
+function normalizeDay(day: string): string {
+  const trimmed = day.trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1, 3).toLowerCase();
+}
 const BUSINESS_DAYS = new Set(
-  (process.env.CALLING_WINDOW_DAYS ?? "Mon,Tue,Wed,Thu,Fri").split(",").map((d) => d.trim())
+  (process.env.CALLING_WINDOW_DAYS ?? "Mon,Tue,Wed,Thu,Fri").split(",").filter(Boolean).map(normalizeDay)
 );
 
 /**

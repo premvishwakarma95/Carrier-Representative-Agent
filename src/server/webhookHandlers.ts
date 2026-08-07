@@ -16,7 +16,7 @@
  * re-check after a tool call is still disabled — that belongs to the
  * orchestration-flow rebuild, not this file.
  */
-import { CallAttempt, Quote } from "../db/models/index.js";
+import { CallAttempt, Quote, Carrier } from "../db/models/index.js";
 import { applyCallOutcome } from "./callOutcome.js";
 import {
   declineCarrier as mdrDeclineCarrier,
@@ -93,47 +93,86 @@ async function dispatchTool(name: string, params: Record<string, any>, context: 
   }
 }
 
-/** Maps calculate_quote/submit_quote's tool params to MDR's call-result/call-final-result request shape. */
-function buildQuotePayload(outreachId: number, params: any) {
+/**
+ * Defensive coercion for numeric fields the LLM supplies. The tool schema
+ * says "number", but that's not runtime-enforced — a stringified value
+ * (or a missing one) must throw here rather than silently reach MDR as
+ * NaN, which JSON.stringify turns into a bare `null` with no error at all.
+ */
+function toNumber(value: unknown, fieldName: string): number {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) {
+    throw new Error(`Invalid numeric value for ${fieldName}: ${JSON.stringify(value)}`);
+  }
+  return num;
+}
+
+function toOptionalNumber(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return toNumber(value, fieldName);
+}
+
+/** MDR's is_warehouse/all_in fields are strictly 0 or 1, not just "any number." */
+function toBinaryFlag(value: unknown, fieldName: string): 0 | 1 {
+  const num = toNumber(value, fieldName);
+  if (num !== 0 && num !== 1) {
+    throw new Error(`Invalid value for ${fieldName}: expected 0 or 1, got ${JSON.stringify(value)}`);
+  }
+  return num;
+}
+
+/** Coerced/validated calculate_quote / submit_quote fields — shared shape both MDR and the local Quote record derive from. */
+function parseQuoteFields(params: any) {
   return {
-    outreach_id: outreachId,
-    base_rate: params.base_rate,
-    fsc: params.fsc,
-    acc_types: params.acc_types ?? [],
-    transload_rate: params.transload_rate,
-    finalmile_rate: params.finalmile_rate,
-    finalmile_fsc: params.finalmile_fsc,
-    is_warehouse: params.is_warehouse,
-    storage_rate: params.storage_rate,
-    warehouse_id: params.warehouse_id,
-    rate_valid_until: params.rate_valid_until,
-    driver_available: params.driver_available,
-    details: params.details,
+    base_rate: toNumber(params.base_rate, "base_rate"),
+    fsc: toNumber(params.fsc, "fsc"),
+    acc_types: Array.isArray(params.acc_types)
+      ? params.acc_types.map((id: unknown, i: number) => toNumber(id, `acc_types[${i}]`))
+      : [],
+    transload_rate: toOptionalNumber(params.transload_rate, "transload_rate"),
+    finalmile_rate: toOptionalNumber(params.finalmile_rate, "finalmile_rate"),
+    finalmile_fsc: toOptionalNumber(params.finalmile_fsc, "finalmile_fsc"),
+    is_warehouse: toBinaryFlag(params.is_warehouse, "is_warehouse"),
+    storage_rate: toOptionalNumber(params.storage_rate, "storage_rate"),
+    warehouse_id: toOptionalNumber(params.warehouse_id, "warehouse_id"),
+    rate_valid_until: String(params.rate_valid_until ?? ""),
+    driver_available: String(params.driver_available ?? ""),
+    details: params.details ? String(params.details) : undefined,
   };
 }
 
-/** Same field set as buildQuotePayload, reshaped for the local Quote record (camelCase, no outreach_id). */
-function buildLocalQuoteFields(params: any) {
+type ParsedQuoteFields = ReturnType<typeof parseQuoteFields>;
+
+/** Maps parsed calculate_quote/submit_quote fields to MDR's call-result/call-final-result request shape. */
+function buildQuotePayload(outreachId: number, fields: ParsedQuoteFields) {
+  return { outreach_id: outreachId, ...fields };
+}
+
+/** Same fields, reshaped for the local Quote record (camelCase, no outreach_id). */
+function buildLocalQuoteFields(fields: ParsedQuoteFields) {
   return {
-    baseRate: params.base_rate,
-    fsc: params.fsc,
-    accTypes: params.acc_types ?? [],
-    transloadRate: params.transload_rate,
-    finalmileRate: params.finalmile_rate,
-    finalmileFsc: params.finalmile_fsc,
-    isWarehouse: params.is_warehouse,
-    storageRate: params.storage_rate,
-    warehouseId: params.warehouse_id,
-    rateValidUntil: params.rate_valid_until,
-    driverAvailable: params.driver_available,
-    details: params.details,
+    baseRate: fields.base_rate,
+    fsc: fields.fsc,
+    accTypes: fields.acc_types,
+    transloadRate: fields.transload_rate,
+    finalmileRate: fields.finalmile_rate,
+    finalmileFsc: fields.finalmile_fsc,
+    isWarehouse: fields.is_warehouse,
+    storageRate: fields.storage_rate,
+    warehouseId: fields.warehouse_id,
+    rateValidUntil: fields.rate_valid_until,
+    driverAvailable: fields.driver_available,
+    details: fields.details,
   };
 }
 
 async function calculateQuote(params: any, { attempt }: CallContext) {
   // No fallback here — the whole point of this call is MDR's calculated
-  // total, so a failure has to be visible to Everly, not swallowed.
-  const result = await mdrSubmitCallResult(buildQuotePayload(Number(attempt.carrierId), params));
+  // total, so a failure has to be visible to Everly, not swallowed. This
+  // includes toNumber() throwing on a malformed field — better to surface
+  // that to Everly (who can re-ask/retry) than send bad data to MDR.
+  const fields = parseQuoteFields(params);
+  const result = await mdrSubmitCallResult(buildQuotePayload(Number(attempt.carrierId), fields));
   const data = result.rate_calculation.original.data;
 
   // Draft record, upserted per call attempt — durable proof of what was
@@ -145,7 +184,7 @@ async function calculateQuote(params: any, { attempt }: CallContext) {
       loadId: attempt.loadId,
       carrierId: attempt.carrierId,
       callAttemptId: attempt._id,
-      ...buildLocalQuoteFields(params),
+      ...buildLocalQuoteFields(fields),
       rateCalculation: result.rate_calculation,
       mdrQuoteId: data.quote_id,
     },
@@ -161,8 +200,8 @@ async function calculateQuote(params: any, { attempt }: CallContext) {
 }
 
 async function submitQuote(params: any, { attempt }: CallContext) {
-  const accTypes = params.acc_types ?? [];
-  const allIn = accTypes.length > 0 ? 0 : 1;
+  const fields = parseQuoteFields(params);
+  const allIn = fields.acc_types.length > 0 ? 0 : 1;
 
   // Local audit copy first — durable proof of exactly what was captured and
   // confirmed, even if the MDR write below fails.
@@ -172,7 +211,7 @@ async function submitQuote(params: any, { attempt }: CallContext) {
       loadId: attempt.loadId,
       carrierId: attempt.carrierId,
       callAttemptId: attempt._id,
-      ...buildLocalQuoteFields(params),
+      ...buildLocalQuoteFields(fields),
       allIn,
       carrierConfirmedReadBack: Boolean(params.carrierConfirmedReadBack),
     },
@@ -183,7 +222,7 @@ async function submitQuote(params: any, { attempt }: CallContext) {
   await attempt.save();
 
   try {
-    await mdrSubmitCallFinalResult({ ...buildQuotePayload(Number(attempt.carrierId), params), all_in: allIn });
+    await mdrSubmitCallFinalResult({ ...buildQuotePayload(Number(attempt.carrierId), fields), all_in: allIn });
     localQuote.mdrSubmissionStatus = "submitted";
     await localQuote.save();
   } catch (err) {
@@ -191,7 +230,32 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     localQuote.mdrSubmissionStatus = "failed";
     localQuote.mdrError = (err as Error).message;
     await localQuote.save();
-    return { ok: true, mdrSync: "failed", quoteId: localQuote.id };
+    // Unlike log_decline/record_do_not_call — where the local capture IS
+    // the durable source of truth regardless of MDR sync — the entire
+    // point of submit_quote is the MDR record itself; the broker reviews
+    // quotes there, not our local DB. `ok: true` here would tell the LLM
+    // this succeeded (a real call showed it doing exactly that: declaring
+    // "I'm submitting your quote" to the carrier despite this failing) and
+    // violate the prompt's own "never claim success on a failed tool call"
+    // rule. ok: false makes the failure impossible for the LLM to miss.
+    return { ok: false, error: "MDR submission failed", mdrSync: "failed", quoteId: localQuote.id };
+  }
+
+  // A carrier who's successfully quoted this load has no reason to be
+  // called again for it — same reasoning as log_decline/record_do_not_call/
+  // resend_email: without this, dispatch.ts's cadence has nothing that
+  // knows a quote already came in, so attempts 2-4 would otherwise still
+  // get scheduled and dialed. Only on a successful MDR write — a failed
+  // submission means no quote actually exists yet, so this carrier still
+  // needs to be reachable. Best-effort, same non-blocking pattern as the
+  // others.
+  try {
+    await Carrier.updateOne(
+      { outreach_id: Number(attempt.carrierId) },
+      { stop_call: true, stop_reason: "Quote submitted" }
+    );
+  } catch (err) {
+    console.error(`submit_quote: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
   }
 
   return { ok: true, mdrSync: "ok", quoteId: localQuote.id };
@@ -215,6 +279,24 @@ async function logDecline(params: any, { attempt }: CallContext) {
     mdrSync = "failed";
   }
 
+  // Each local Carrier record is already scoped to one (carrier, load) pair
+  // — outreach_id is the unique key, and a carrier gets a fresh outreach_id
+  // per load invitation — so this only stops further attempts on THIS load,
+  // not future different loads for the same company. Without this,
+  // dispatch.ts's cadence has nothing that checks callResult/decline status,
+  // so attempts 2-4 would otherwise still get scheduled and dialed after a
+  // carrier already said no. Best-effort, same pattern as
+  // record_do_not_call: dispatch.ts still re-checks fresh against MDR before
+  // ever dialing, so this is belt-and-suspenders, not the sole gate.
+  try {
+    await Carrier.updateOne(
+      { outreach_id: Number(attempt.carrierId) },
+      { stop_call: true, stop_reason: reasonText }
+    );
+  } catch (err) {
+    console.error(`log_decline: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+  }
+
   return { ok: true, mdrSync };
 }
 
@@ -226,21 +308,31 @@ async function scheduleCallback(params: any, { attempt }: CallContext) {
   return { ok: true };
 }
 
-async function recordDoNotCall(params: any, { attempt }: CallContext) {
+async function recordDoNotCall(_params: any, { attempt }: CallContext) {
   attempt.callResult = "do_not_call";
   await attempt.save();
 
   // MDR's /voice/stop has no email-vs-calls distinction — it always means
-  // "stop calling." scope is kept as our own local-only nuance; the reason
-  // text sent to MDR just reflects it for their audit trail.
-  const reasonText =
-    params.scope === "calls_and_email" ? "Requested no further calls or emails" : "Requested no further calls";
+  // "stop calling," which is also the only thing this system manages
+  // (bid emails are MDR's own domain, not asked about on the call).
+  const reasonText = "Requested no further calls";
   let mdrSync: "ok" | "failed" = "ok";
   try {
     await mdrStopCarrier(Number(attempt.carrierId), reasonText);
   } catch (err) {
     console.error(`record_do_not_call: MDR stop write-back failed for carrier ${attempt.carrierId}:`, err);
     mdrSync = "failed";
+  }
+
+  // Keep our own copy truthful too — dispatch.ts always re-checks fresh
+  // against MDR before dialing regardless (that's the real safety gate),
+  // but leaving stop_call stale here means our own DB silently drifts from
+  // reality after every opt-out. Best-effort: doesn't affect the tool's
+  // success if it fails.
+  try {
+    await Carrier.updateOne({ outreach_id: Number(attempt.carrierId) }, { stop_call: true, stop_reason: reasonText });
+  } catch (err) {
+    console.error(`record_do_not_call: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
   }
 
   return { ok: true, mdrSync };
@@ -251,13 +343,32 @@ async function resendEmail(_params: any, { attempt }: CallContext) {
   // back on if this fails, so let a failure propagate to handleToolCalls'
   // outer catch and get reported to Everly rather than being swallowed.
   const result = await mdrResendInvitationEmail(Number(attempt.carrierId));
+
+  // Choosing to quote by email means this carrier isn't expecting another
+  // phone call for this load — same reasoning as log_decline/
+  // record_do_not_call: without this, dispatch.ts's cadence has nothing
+  // that knows they already chose a different channel, so attempts 2-4
+  // would otherwise still get scheduled and dialed. Best-effort, same
+  // pattern as those two — doesn't affect this tool's own success if it
+  // fails, and dispatch.ts still re-checks fresh against MDR before ever
+  // dialing regardless.
+  try {
+    await Carrier.updateOne(
+      { outreach_id: Number(attempt.carrierId) },
+      { stop_call: true, stop_reason: "Chose to submit quote by email" }
+    );
+  } catch (err) {
+    console.error(`resend_email: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+  }
+
   return { ok: true, message: result.message };
 }
 
 async function addAccessorialTool(params: any, { attempt }: CallContext) {
   // Same reasoning as resendEmail — the whole point of this call is the
   // MDR-assigned id; a failure has to be visible, not silently absorbed.
-  const result = await mdrAddAccessorial(Number(attempt.carrierId), params.name, params.price);
+  const price = toNumber(params.price, "price");
+  const result = await mdrAddAccessorial(Number(attempt.carrierId), params.name, price);
   return { ok: true, accessorial: result.accessorials };
 }
 
