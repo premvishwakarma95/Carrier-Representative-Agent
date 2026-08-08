@@ -165,6 +165,23 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   }
 
   if (fresh.carrier.stop_call) {
+    // MDR is the one who discovered this, not our own record_do_not_call
+    // tool call (a carrier can opt out through channels other than a call
+    // we placed) — without this, our local copy stays stale at false
+    // forever, and every future dispatch run pays for a redundant MDR
+    // lookup to rediscover the same fact. Best-effort: doesn't affect the
+    // skip decision above, which already happened off the fresh MDR value.
+    try {
+      await Carrier.updateOne(
+        { outreach_id: carrier.outreach_id },
+        { stop_call: true, stop_reason: fresh.carrier.stop_reason ?? "Stopped on MDR" }
+      );
+    } catch (err) {
+      console.error(
+        `dispatch/run: failed to sync local Carrier.stop_call for outreach_id ${carrier.outreach_id}:`,
+        err
+      );
+    }
     results.push({ loadId: load.id, outreachId: carrier.outreach_id, outcome: "skipped_stop_call" });
     return false;
   }
