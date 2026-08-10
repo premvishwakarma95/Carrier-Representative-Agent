@@ -5,12 +5,20 @@ export async function createOutboundCall(params: {
   phoneNumberId: string;
   customerNumber: string;
   variableValues: Record<string, string | number | boolean>;
+  // Per-call override of the assistant's stored firstMessage — used when
+  // there's prior call history for this load+carrier, so the opening line
+  // itself (not just what the LLM says after it) reflects that. Omit for
+  // the assistant's default (every first-time call).
+  firstMessage?: string;
 }) {
   return vapi.post<{ id: string }>("/call", {
     assistantId: params.assistantId,
     phoneNumberId: params.phoneNumberId,
     customer: { number: params.customerNumber },
-    assistantOverrides: { variableValues: params.variableValues },
+    assistantOverrides: {
+      variableValues: params.variableValues,
+      ...(params.firstMessage ? { firstMessage: params.firstMessage } : {}),
+    },
   });
 }
 

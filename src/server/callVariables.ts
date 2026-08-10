@@ -93,7 +93,7 @@ function renderKnownAccessorials(items: Array<{ id: number; name: string; price:
   return items.map((item) => `${item.name} (id ${item.id}, $${item.price})`).join(", ");
 }
 
-export function buildCallVariables(load: any, carrier: MdrCarrierDetail) {
+export function buildCallVariables(load: any, carrier: MdrCarrierDetail, callMemory: string = "") {
   const currentDate = formatCurrentDate();
 
   // Three independent gates, per client clarification — do not conflate
@@ -123,6 +123,15 @@ export function buildCallVariables(load: any, carrier: MdrCarrierDetail) {
 
   return {
     currentDate,
+
+    // Populated by src/server/callMemory.ts, computed by dispatch.ts before
+    // calling this function (requires an async DB lookup this function
+    // deliberately doesn't do itself — see callMemory.ts's header comment).
+    // Vapi substitutes {{callMemory}} as literal text before the model ever
+    // sees the prompt — an empty string there would leave a dangling
+    // fragment mid-sentence, not a value the model can branch on. Always
+    // render a complete, unambiguous statement instead.
+    callMemory: callMemory || "No prior contact — this is the first call to this carrier for this load.",
 
     carrierName: fallback(carrier.company_name),
     carrierEmail: fallback(carrier.email),

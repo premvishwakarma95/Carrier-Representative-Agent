@@ -35,7 +35,9 @@ import { getSpecificCarrier } from "../mdr/api.js";
 import { computeAttemptSchedule, MAX_CALL_ATTEMPTS } from "./cadence.js";
 import { isWithinCallingWindow, isValidTimezone } from "./callingWindow.js";
 import { buildCallVariables } from "./callVariables.js";
+import { buildCallMemory, hasMeaningfulPriorContact } from "./callMemory.js";
 import { createOutboundCall } from "../vapi/calls.js";
+import { FOLLOW_UP_FIRST_MESSAGE, FOLLOW_UP_UNANSWERED_FIRST_MESSAGE } from "../assistant/prompt.js";
 import { env } from "../config/env.js";
 
 export const dispatchRouter = Router();
@@ -339,12 +341,24 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   }
 
   try {
-    const variableValues = buildCallVariables(load, fresh.carrier);
+    // Cross-load: keyed on MDR's stable carrier_id, not outreach_id (which
+    // is per-load-invitation) — see callMemory.ts's header comment. This is
+    // deliberately separate from existingAttempts above, which stays scoped
+    // to (load, outreach_id) since cadence/MAX_CALL_ATTEMPTS are inherently
+    // per-load concepts, not something to share across different loads.
+    const callMemory = await buildCallMemory(fresh.carrier.carrier_id, String(load.id));
+    const variableValues = buildCallVariables(load, fresh.carrier, callMemory);
+    const firstMessage = callMemory
+      ? (await hasMeaningfulPriorContact(fresh.carrier.carrier_id))
+        ? FOLLOW_UP_FIRST_MESSAGE
+        : FOLLOW_UP_UNANSWERED_FIRST_MESSAGE
+      : undefined;
     const call = await createOutboundCall({
       assistantId: process.env.EVERLY_ASSISTANT_ID as string,
       phoneNumberId: env.vapiPhoneNumberId,
       customerNumber: phone,
       variableValues,
+      firstMessage,
     });
 
     attempt.vapiCallId = call.id;

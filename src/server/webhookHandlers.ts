@@ -18,6 +18,7 @@
  */
 import { CallAttempt, Quote, Carrier } from "../db/models/index.js";
 import { applyCallOutcome } from "./callOutcome.js";
+import { MAX_CALL_ATTEMPTS } from "./cadence.js";
 import {
   declineCarrier as mdrDeclineCarrier,
   stopCarrier as mdrStopCarrier,
@@ -30,7 +31,7 @@ import {
 import type { HydratedDocument } from "mongoose";
 
 /** "lane_not_serviced" -> "Lane not serviced" — MDR's reason fields are free text, not our fixed enum. */
-function humanizeReason(reason: string): string {
+export function humanizeReason(reason: string): string {
   const text = reason.replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -395,4 +396,24 @@ export async function handleEndOfCallReport(message: any) {
   await attempt.save();
   // Stop-condition re-check disabled pending rebuild — see the PENDING
   // REBUILD note at the top of this file.
+
+  // dispatch.ts's MAX_CALL_ATTEMPTS cap already stops scheduling a 5th
+  // attempt on its own — this doesn't change that gating. It just makes the
+  // local Carrier record honestly reflect "we're done calling this carrier
+  // for this load" right away, instead of only becoming apparent the next
+  // time someone happens to run dispatch and sees max_attempts_reached.
+  // Local-only, deliberately no MDR write-through: unlike decline/opt-out/
+  // quote (which are facts the carrier told us that MDR should also know),
+  // running out of attempts is purely an internal cadence fact — the
+  // carrier didn't say anything, so there's nothing to report to MDR.
+  if (attempt.attemptNumber >= MAX_CALL_ATTEMPTS) {
+    try {
+      await Carrier.updateOne(
+        { outreach_id: Number(attempt.carrierId) },
+        { stop_call: true, stop_reason: "Max call attempts reached" }
+      );
+    } catch (err) {
+      console.error(`end-of-call-report: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+    }
+  }
 }
