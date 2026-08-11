@@ -1,8 +1,9 @@
 import express from "express";
+import cron from "node-cron";
 import { connectDB } from "../db/connection.js";
 import { handleToolCalls, handleEndOfCallReport } from "./webhookHandlers.js";
 import { mdrWebhookRouter } from "./mdrWebhook.js";
-import { dispatchRouter } from "./dispatch.js";
+import { dispatchRouter, runDispatchCycle } from "./dispatch.js";
 
 // Last-resort safety net: every route handler in this codebase is already
 // individually guarded, but this is the backstop for anything that still
@@ -89,11 +90,35 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 const PORT = process.env.PORT ?? 3000;
 
+/**
+ * Runs one live dispatch cycle (never dry-run) and logs the outcome — the
+ * scheduled counterpart to a person hitting POST /dispatch/run by hand.
+ * Calls runDispatchCycle() directly rather than making an HTTP request to
+ * this same server, so there's no self-network-call and no duplicated
+ * orchestration logic (see dispatch.ts's header comment on that function).
+ */
+async function scheduledDispatchTick() {
+  const result = await runDispatchCycle(false);
+  if (result.ok) {
+    console.log("Scheduled dispatch cycle:", result.summary);
+  } else {
+    console.error("Scheduled dispatch cycle failed:", result.error);
+  }
+}
+
 async function main() {
   await connectDB();
   app.listen(PORT, () => {
     console.log(`Webhook server listening on port ${PORT}`);
   });
+
+  // Run once immediately on startup so a restart doesn't leave a silent gap
+  // until the first scheduled tick, then every 5 minutes after — frequent
+  // enough that a due call isn't meaningfully delayed (cadence offsets and
+  // the calling window are both hour-granularity), infrequent enough not to
+  // hammer MDR's per-carrier lookup for no reason.
+  // await scheduledDispatchTick();
+  // cron.schedule("*/5 * * * *", scheduledDispatchTick);
 }
 
 main().catch((err) => {

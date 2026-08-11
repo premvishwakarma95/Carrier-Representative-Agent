@@ -44,46 +44,80 @@ export const dispatchRouter = Router();
 
 type Result = Record<string, unknown>;
 
+// True while a cycle (from either the HTTP route or the cron scheduler in
+// server/index.ts) is in flight. Each cycle enqueues calls with Vapi rather
+// than waiting on live conversations, so it's normally fast — this flag is
+// just cheap insurance against a slow MDR API making two cycles overlap,
+// not a fix for an observed problem. Module-level, not per-request, since
+// there's only ever one dispatch process running.
+let cycleInProgress = false;
+
+/**
+ * The actual orchestration cycle: for every open load, for every one of its
+ * not-stopped carriers, freshly re-check MDR and either skip or dial per the
+ * rules in this file's header comment. Shared by both the manual HTTP route
+ * below and the cron scheduler in server/index.ts — there is exactly one
+ * implementation, so the two can never drift apart. Callers decide what to
+ * do with a `{ ok: false, error }` result (the route 500s; the cron job just
+ * logs it) rather than this function throwing, so a skipped-cycle-while-busy
+ * or a top-level DB failure is always a normal returned value, not a thrown
+ * error a caller could forget to catch.
+ */
+export async function runDispatchCycle(dryRun: boolean): Promise<
+  { ok: true; dryRun: boolean; summary: Record<string, number>; results: Result[] } | { ok: false; error: string }
+> {
+  if (cycleInProgress) {
+    return { ok: false, error: "A dispatch cycle is already in progress — skipping this run." };
+  }
+  cycleInProgress = true;
+
+  try {
+    const results: Result[] = [];
+
+    // Top-level guard: even a failure before any load-specific work starts
+    // (e.g. the DB connection itself is down) must still return a normal
+    // result, not throw and risk leaving cycleInProgress stuck true.
+    let loads;
+    try {
+      // Oldest-posted loads first (FIFO).
+      loads = await Load.find({ is_load_close: false }).sort({ createdAt: 1 });
+    } catch (err) {
+      console.error("dispatch: failed to fetch open loads:", err);
+      return { ok: false, error: `Failed to fetch open loads: ${(err as Error).message}` };
+    }
+
+    for (const load of loads) {
+      try {
+        await processLoad(load, results, dryRun);
+      } catch (err) {
+        // Should be unreachable — processLoad has its own internal handling —
+        // but if something still escapes it, this load's failure must not
+        // stop the remaining loads from being processed.
+        console.error(`dispatch: unexpected failure processing load ${load.id}:`, err);
+        results.push({ loadId: load.id, outcome: "error", error: (err as Error).message });
+      }
+    }
+
+    const summary = results.reduce<Record<string, number>>((acc, r) => {
+      const outcome = String(r.outcome);
+      acc[outcome] = (acc[outcome] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    return { ok: true, dryRun, summary, results };
+  } finally {
+    cycleInProgress = false;
+  }
+}
+
 dispatchRouter.post("/run", async (req, res) => {
   // ?dryRun=true runs the exact same eligibility/cadence/window pipeline
   // against real data but stops just short of creating a CallAttempt or
   // touching Vapi — reports "would_dial" instead. Lets the whole decision
   // engine be verified against real carriers with zero side effects.
   const dryRun = req.query.dryRun === "true" || req.query.dryRun === "1";
-  const results: Result[] = [];
-
-  // Top-level guard: even a failure before any load-specific work starts
-  // (e.g. the DB connection itself is down) must still return a proper HTTP
-  // response, not hang the request or crash the process.
-  let loads;
-  try {
-    // Oldest-posted loads first (FIFO).
-    loads = await Load.find({ is_load_close: false }).sort({ createdAt: 1 });
-  } catch (err) {
-    console.error("dispatch/run: failed to fetch open loads:", err);
-    res.status(500).json({ ok: false, error: "Failed to fetch open loads", details: (err as Error).message });
-    return;
-  }
-
-  for (const load of loads) {
-    try {
-      await processLoad(load, results, dryRun);
-    } catch (err) {
-      // Should be unreachable — processLoad has its own internal handling —
-      // but if something still escapes it, this load's failure must not
-      // stop the remaining loads from being processed.
-      console.error(`dispatch/run: unexpected failure processing load ${load.id}:`, err);
-      results.push({ loadId: load.id, outcome: "error", error: (err as Error).message });
-    }
-  }
-
-  const summary = results.reduce<Record<string, number>>((acc, r) => {
-    const outcome = String(r.outcome);
-    acc[outcome] = (acc[outcome] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  res.status(200).json({ ok: true, dryRun, summary, results });
+  const result = await runDispatchCycle(dryRun);
+  res.status(result.ok ? 200 : 500).json(result);
 });
 
 async function processLoad(load: any, results: Result[], dryRun: boolean) {
