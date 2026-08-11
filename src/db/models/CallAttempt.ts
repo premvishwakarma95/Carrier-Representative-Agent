@@ -12,6 +12,15 @@ const callAttemptSchema = new Schema(
     scheduledFor: { type: Date, required: true }, // when this attempt should fire, per cadence rules
     vapiCallId: String, // set once actually dialed
 
+    // Carrier's real timezone, from the same fresh MDR "Get Specific Carrier"
+    // response dispatch.ts already fetches before dialing — stored here so
+    // the schedule_callback tool (fired mid-call, no fresh MDR round-trip
+    // available) has an authoritative timezone to validate a proposed
+    // callback time against, without trusting whatever zone the carrier says
+    // out loud. See callingWindow.ts's header comment for why MDR's value is
+    // always the source of truth, never a carrier-stated one.
+    timezone: String,
+
     status: {
       type: String,
       enum: ["scheduled", "in_progress", "completed", "no_answer", "voicemail", "failed", "cancelled"],

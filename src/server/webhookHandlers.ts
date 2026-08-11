@@ -19,6 +19,7 @@
 import { CallAttempt, Quote, Carrier } from "../db/models/index.js";
 import { applyCallOutcome } from "./callOutcome.js";
 import { MAX_CALL_ATTEMPTS } from "./cadence.js";
+import { isWithinCallingWindow, isValidTimezone, formatCallingWindow, wallClockToUtc } from "./callingWindow.js";
 import {
   declineCarrier as mdrDeclineCarrier,
   stopCarrier as mdrStopCarrier,
@@ -302,8 +303,36 @@ async function logDecline(params: any, { attempt }: CallContext) {
 }
 
 async function scheduleCallback(params: any, { attempt }: CallContext) {
+  // attempt.timezone is MDR's own carrier_timezone, captured fresh when this
+  // attempt was dialed (see dispatch.ts) — the authority for both parsing
+  // and the window check, not carrierTimeZone (whatever the carrier says out
+  // loud, only stored for reference) and not any offset embedded in
+  // callbackDateTime itself (the LLM can't be trusted to get that right —
+  // see wallClockToUtc's header comment). Falls back to native parsing only
+  // when there's no valid stored zone to interpret wall-clock digits against.
+  const hasValidTimezone = isValidTimezone(attempt.timezone);
+  let proposed: Date;
+  try {
+    proposed = hasValidTimezone ? wallClockToUtc(params.callbackDateTime, attempt.timezone) : new Date(params.callbackDateTime);
+  } catch (err) {
+    throw new Error(`Invalid callbackDateTime: ${JSON.stringify(params.callbackDateTime)} (${(err as Error).message})`);
+  }
+  if (Number.isNaN(proposed.getTime())) {
+    throw new Error(`Invalid callbackDateTime: ${JSON.stringify(params.callbackDateTime)}`);
+  }
+
+  if (hasValidTimezone && !isWithinCallingWindow(attempt.timezone, proposed)) {
+    return {
+      ok: false,
+      error: "outside_calling_window",
+      message:
+        `That time is outside our calling window. We're able to call ${formatCallingWindow()}. ` +
+        "Please ask for a different time within that window, then call schedule_callback again.",
+    };
+  }
+
   attempt.callResult = "callback";
-  attempt.callbackAt = params.callbackDateTime;
+  attempt.callbackAt = proposed;
   attempt.callbackTimeZone = params.carrierTimeZone;
   await attempt.save();
   return { ok: true };

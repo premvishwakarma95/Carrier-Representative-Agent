@@ -244,12 +244,19 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   let scheduledFor;
   try {
     const lastAttempt = existingAttempts[existingAttempts.length - 1];
-    scheduledFor = computeAttemptSchedule({
-      attemptNumber: nextAttemptNumber,
-      timezone: fresh.carrier.carrier_timezone,
-      emailSentAt,
-      previousAttemptAt: lastAttempt?.startedAt ?? lastAttempt?.createdAt,
-    });
+    // A carrier who agreed to a specific callback time (schedule_callback,
+    // already validated against the calling window when it was captured —
+    // see webhookHandlers.ts) overrides the normal cadence math entirely for
+    // the next attempt: call then, not at a computed 30min/1hr/2hr/next-
+    // business-morning offset.
+    scheduledFor = lastAttempt?.callbackAt
+      ? lastAttempt.callbackAt
+      : computeAttemptSchedule({
+          attemptNumber: nextAttemptNumber,
+          timezone: fresh.carrier.carrier_timezone,
+          emailSentAt,
+          previousAttemptAt: lastAttempt?.startedAt ?? lastAttempt?.createdAt,
+        });
   } catch (err) {
     console.error(
       `dispatch/run: failed to compute attempt schedule (load ${load.id}, outreach_id ${carrier.outreach_id}, attempt ${nextAttemptNumber}):`,
@@ -324,6 +331,7 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
       scheduledFor,
       status: "in_progress",
       startedAt: now,
+      timezone: fresh.carrier.carrier_timezone,
     });
   } catch (err: any) {
     if (err?.code === 11000) {
@@ -347,7 +355,7 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
     // to (load, outreach_id) since cadence/MAX_CALL_ATTEMPTS are inherently
     // per-load concepts, not something to share across different loads.
     const callMemory = await buildCallMemory(fresh.carrier.carrier_id, String(load.id));
-    const variableValues = buildCallVariables(load, fresh.carrier, callMemory);
+    const variableValues = buildCallVariables(load, fresh.carrier, callMemory, nextAttemptNumber === MAX_CALL_ATTEMPTS);
     const firstMessage = callMemory
       ? (await hasMeaningfulPriorContact(fresh.carrier.carrier_id))
         ? FOLLOW_UP_FIRST_MESSAGE

@@ -143,8 +143,18 @@ export const TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          callbackDateTime: { type: "string", description: "ISO date/time" },
-          carrierTimeZone: { type: "string" },
+          callbackDateTime: {
+            type: "string",
+            description:
+              "the callback date and time as plain wall-clock values, e.g. 2026-08-15T14:30:00 for " +
+              "2:30 PM on Aug 15. Do not add a UTC offset or a 'Z' suffix — always write the time " +
+              "exactly as the carrier stated it in their own local time, the server already knows " +
+              "their real time zone and interprets these numbers against it.",
+          },
+          carrierTimeZone: {
+            type: "string",
+            description: "the time zone the carrier mentioned, if any — for reference only, not used for scheduling",
+          },
         },
         required: ["callbackDateTime"],
       },

@@ -93,8 +93,22 @@ function renderKnownAccessorials(items: Array<{ id: number; name: string; price:
   return items.map((item) => `${item.name} (id ${item.id}, $${item.price})`).join(", ");
 }
 
-export function buildCallVariables(load: any, carrier: MdrCarrierDetail, callMemory: string = "") {
+export function buildCallVariables(
+  load: any,
+  carrier: MdrCarrierDetail,
+  callMemory: string = "",
+  isFinalAttempt: boolean = false
+) {
   const currentDate = formatCurrentDate();
+
+  // Rendered as a complete statement, same reasoning as callMemory above —
+  // Vapi substitutes {{attemptStatus}} as literal text, so a bare boolean
+  // would leave the model to guess at phrasing. See prompt.ts's "Attempt
+  // status" section and the schedule_callback final-attempt rule that reads
+  // it — computed by dispatch.ts from nextAttemptNumber === MAX_CALL_ATTEMPTS.
+  const attemptStatus = isFinalAttempt
+    ? "This is the final allowed call to this carrier for this load — no further automated attempts will happen after this one."
+    : "This is not the final allowed attempt — further automated attempts remain if needed.";
 
   // Three independent gates, per client clarification — do not conflate
   // them, each drives a different subset of the "Storage & final-mile
@@ -132,6 +146,7 @@ export function buildCallVariables(load: any, carrier: MdrCarrierDetail, callMem
     // fragment mid-sentence, not a value the model can branch on. Always
     // render a complete, unambiguous statement instead.
     callMemory: callMemory || "No prior contact — this is the first call to this carrier for this load.",
+    attemptStatus,
 
     carrierName: fallback(carrier.company_name),
     carrierEmail: fallback(carrier.email),
