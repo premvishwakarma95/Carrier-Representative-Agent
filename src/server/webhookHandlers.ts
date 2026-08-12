@@ -174,7 +174,7 @@ async function calculateQuote(params: any, { attempt }: CallContext) {
   // includes toNumber() throwing on a malformed field — better to surface
   // that to Everly (who can re-ask/retry) than send bad data to MDR.
   const fields = parseQuoteFields(params);
-  const result = await mdrSubmitCallResult(buildQuotePayload(Number(attempt.carrierId), fields));
+  const result = await mdrSubmitCallResult(buildQuotePayload(Number(attempt.outreachId), fields));
   const data = result.rate_calculation.original.data;
 
   // Draft record, upserted per call attempt — durable proof of what was
@@ -184,7 +184,7 @@ async function calculateQuote(params: any, { attempt }: CallContext) {
     { callAttemptId: attempt._id },
     {
       loadId: attempt.loadId,
-      carrierId: attempt.carrierId,
+      carrierId: attempt.outreachId,
       callAttemptId: attempt._id,
       ...buildLocalQuoteFields(fields),
       rateCalculation: result.rate_calculation,
@@ -211,7 +211,7 @@ async function submitQuote(params: any, { attempt }: CallContext) {
     { callAttemptId: attempt._id },
     {
       loadId: attempt.loadId,
-      carrierId: attempt.carrierId,
+      carrierId: attempt.outreachId,
       callAttemptId: attempt._id,
       ...buildLocalQuoteFields(fields),
       allIn,
@@ -224,11 +224,11 @@ async function submitQuote(params: any, { attempt }: CallContext) {
   await attempt.save();
 
   try {
-    await mdrSubmitCallFinalResult({ ...buildQuotePayload(Number(attempt.carrierId), fields), all_in: allIn });
+    await mdrSubmitCallFinalResult({ ...buildQuotePayload(Number(attempt.outreachId), fields), all_in: allIn });
     localQuote.mdrSubmissionStatus = "submitted";
     await localQuote.save();
   } catch (err) {
-    console.error(`submit_quote: MDR call-final-result write-back failed for carrier ${attempt.carrierId}:`, err);
+    console.error(`submit_quote: MDR call-final-result write-back failed for carrier ${attempt.outreachId}:`, err);
     localQuote.mdrSubmissionStatus = "failed";
     localQuote.mdrError = (err as Error).message;
     await localQuote.save();
@@ -253,11 +253,11 @@ async function submitQuote(params: any, { attempt }: CallContext) {
   // others.
   try {
     await Carrier.updateOne(
-      { outreach_id: Number(attempt.carrierId) },
+      { outreach_id: Number(attempt.outreachId) },
       { stop_call: true, stop_reason: "Quote submitted" }
     );
   } catch (err) {
-    console.error(`submit_quote: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+    console.error(`submit_quote: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
   }
 
   return { ok: true, mdrSync: "ok", quoteId: localQuote.id };
@@ -275,9 +275,9 @@ async function logDecline(params: any, { attempt }: CallContext) {
   const reasonText = params.reason === "other" && params.note ? params.note : humanizeReason(params.reason);
   let mdrSync: "ok" | "failed" = "ok";
   try {
-    await mdrDeclineCarrier(Number(attempt.carrierId), reasonText);
+    await mdrDeclineCarrier(Number(attempt.outreachId), reasonText);
   } catch (err) {
-    console.error(`log_decline: MDR decline write-back failed for carrier ${attempt.carrierId}:`, err);
+    console.error(`log_decline: MDR decline write-back failed for carrier ${attempt.outreachId}:`, err);
     mdrSync = "failed";
   }
 
@@ -292,11 +292,11 @@ async function logDecline(params: any, { attempt }: CallContext) {
   // ever dialing, so this is belt-and-suspenders, not the sole gate.
   try {
     await Carrier.updateOne(
-      { outreach_id: Number(attempt.carrierId) },
+      { outreach_id: Number(attempt.outreachId) },
       { stop_call: true, stop_reason: reasonText }
     );
   } catch (err) {
-    console.error(`log_decline: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+    console.error(`log_decline: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
   }
 
   return { ok: true, mdrSync };
@@ -348,9 +348,9 @@ async function recordDoNotCall(_params: any, { attempt }: CallContext) {
   const reasonText = "Requested no further calls";
   let mdrSync: "ok" | "failed" = "ok";
   try {
-    await mdrStopCarrier(Number(attempt.carrierId), reasonText);
+    await mdrStopCarrier(Number(attempt.outreachId), reasonText);
   } catch (err) {
-    console.error(`record_do_not_call: MDR stop write-back failed for carrier ${attempt.carrierId}:`, err);
+    console.error(`record_do_not_call: MDR stop write-back failed for carrier ${attempt.outreachId}:`, err);
     mdrSync = "failed";
   }
 
@@ -360,9 +360,9 @@ async function recordDoNotCall(_params: any, { attempt }: CallContext) {
   // reality after every opt-out. Best-effort: doesn't affect the tool's
   // success if it fails.
   try {
-    await Carrier.updateOne({ outreach_id: Number(attempt.carrierId) }, { stop_call: true, stop_reason: reasonText });
+    await Carrier.updateOne({ outreach_id: Number(attempt.outreachId) }, { stop_call: true, stop_reason: reasonText });
   } catch (err) {
-    console.error(`record_do_not_call: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+    console.error(`record_do_not_call: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
   }
 
   return { ok: true, mdrSync };
@@ -372,7 +372,7 @@ async function resendEmail(_params: any, { attempt }: CallContext) {
   // No fallback here — unlike decline/stop, there's no local state to fall
   // back on if this fails, so let a failure propagate to handleToolCalls'
   // outer catch and get reported to Everly rather than being swallowed.
-  const result = await mdrResendInvitationEmail(Number(attempt.carrierId));
+  const result = await mdrResendInvitationEmail(Number(attempt.outreachId));
 
   // Choosing to quote by email means this carrier isn't expecting another
   // phone call for this load — same reasoning as log_decline/
@@ -384,11 +384,11 @@ async function resendEmail(_params: any, { attempt }: CallContext) {
   // dialing regardless.
   try {
     await Carrier.updateOne(
-      { outreach_id: Number(attempt.carrierId) },
+      { outreach_id: Number(attempt.outreachId) },
       { stop_call: true, stop_reason: "Chose to submit quote by email" }
     );
   } catch (err) {
-    console.error(`resend_email: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+    console.error(`resend_email: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
   }
 
   return { ok: true, message: result.message };
@@ -398,12 +398,12 @@ async function addAccessorialTool(params: any, { attempt }: CallContext) {
   // Same reasoning as resendEmail — the whole point of this call is the
   // MDR-assigned id; a failure has to be visible, not silently absorbed.
   const price = toNumber(params.price, "price");
-  const result = await mdrAddAccessorial(Number(attempt.carrierId), params.name, price);
+  const result = await mdrAddAccessorial(Number(attempt.outreachId), params.name, price);
   return { ok: true, accessorial: result.accessorials };
 }
 
 async function addWarehouseTool(params: any, { attempt }: CallContext) {
-  const result = await mdrAddWarehouse(Number(attempt.carrierId), params.address);
+  const result = await mdrAddWarehouse(Number(attempt.outreachId), params.address);
   return { ok: true, warehouse: result.warehouse };
 }
 
@@ -438,11 +438,11 @@ export async function handleEndOfCallReport(message: any) {
   if (attempt.attemptNumber >= MAX_CALL_ATTEMPTS) {
     try {
       await Carrier.updateOne(
-        { outreach_id: Number(attempt.carrierId) },
+        { outreach_id: Number(attempt.outreachId) },
         { stop_call: true, stop_reason: "Max call attempts reached" }
       );
     } catch (err) {
-      console.error(`end-of-call-report: failed to update local Carrier.stop_call for ${attempt.carrierId}:`, err);
+      console.error(`end-of-call-report: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
     }
   }
 }

@@ -10,22 +10,15 @@
  *  - Reference only the single most recent meaningful attempt, not a history dump.
  *
  * Cross-load: MDR issues a fresh `outreach_id` per load invitation, even for
- * the same real carrier (see the comment on `outreach_id` in
- * src/db/models/Carrier.ts) — so `CallAttempt.carrierId` (= outreach_id) is
- * NOT a stable "this is the same company" key by itself. `carrier_id` (a
- * separate field, present on every Carrier record) is MDR's own stable
- * per-company identifier, per the carrier-profile endpoint description in
- * requirements-tracker.md ("carrier profile ... plus whether that carrier
- * has already quoted this specific load" — carrier_id identifies the
- * company, load_id is a separate dimension). This module looks up every
- * local Carrier record sharing the current carrier_id (across any load),
- * then every CallAttempt tied to any of their outreach_ids — so a carrier
- * who quoted a completely different load last week is still recognized here.
- * If carrier_id ever turns out to also be per-load in practice, this
- * degrades safely to exactly the old per-load behavior (the sibling lookup
- * just returns one Carrier — itself).
+ * the same real carrier — so it's not a stable "this is the same company"
+ * key by itself. `CallAttempt.carrierId` stores MDR's own stable per-company
+ * `carrier_id` instead (a separate field from `outreachId`, which is what
+ * cadence/MAX_CALL_ATTEMPTS stay scoped by — see CallAttempt.ts's field
+ * comments), so this module can query CallAttempt directly by carrier_id —
+ * a carrier who quoted a completely different load last week is still
+ * recognized here, with no need to look anything up via Carrier first.
  */
-import { Carrier, CallAttempt, Quote } from "../db/models/index.js";
+import { CallAttempt, Quote } from "../db/models/index.js";
 import { humanizeReason } from "./webhookHandlers.js";
 
 const MEANINGFUL_STATUSES = new Set(["completed"]);
@@ -35,13 +28,48 @@ function isMeaningful(attempt: any): boolean {
   return MEANINGFUL_STATUSES.has(attempt.status) || MEANINGFUL_RESULTS.has(attempt.callResult);
 }
 
-/** Every CallAttempt across every load tied to this same real carrier (by MDR's stable carrier_id), sorted oldest-first by actual time — attemptNumber is only meaningful within a single load's cadence, so real timestamps are what "most recent" has to mean once loads are mixed together. */
-async function findCrossLoadAttempts(mdrCarrierId: number): Promise<any[]> {
-  const siblingCarriers = await Carrier.find({ carrier_id: mdrCarrierId });
-  const outreachIds = siblingCarriers.map((c) => String(c.outreach_id));
-  if (outreachIds.length === 0) return [];
+// This runs before every single dial (dispatch.ts), so it must stay cheap
+// regardless of how long a carrier's real history gets over months/years of
+// operation — buildCallMemory only ever needs the SINGLE most recent
+// meaningful attempt, so there's no reason to ever pull more than a small,
+// fixed, recent window. A carrier whose last 25 attempts (roughly 6+ loads'
+// worth, even in a worst case of zero meaningful contact each time) contain
+// no real conversation is, for the purpose of this one sentence, no
+// different from one with no history at all — going back further wouldn't
+// produce a more useful thing to say.
+const HISTORY_LOOKBACK_LIMIT = 25;
 
-  return CallAttempt.find({ carrierId: { $in: outreachIds } }).sort({ startedAt: 1, createdAt: 1 });
+/**
+ * Most recent CallAttempts across every load tied to this same real carrier,
+ * newest-first by actual time (bounded — see HISTORY_LOOKBACK_LIMIT above).
+ * attemptNumber is only meaningful within a single load's cadence, so real
+ * timestamps are what "most recent" has to mean once loads are mixed
+ * together.
+ *
+ * Never returns a not-yet-finished attempt ("scheduled"/"in_progress") —
+ * something that hasn't happened yet can never legitimately be "history,"
+ * for any call. This is what actually prevents a real carrier from ever
+ * seeing their own in-progress call reflected back as a past failed one —
+ * not just for the current call's own attempt (see excludeAttemptId below),
+ * but also for the rarer case of a genuinely different, still-in-progress
+ * sibling attempt on a different load for this same real carrier, dialed in
+ * the same narrow window (possible with dispatch running on a schedule
+ * across many loads) — excluding one specific id wouldn't have caught that.
+ *
+ * excludeAttemptId: extra, cheap defense-in-depth for the current call's own
+ * attempt specifically, on top of the status filter above — harmless if
+ * omitted, and redundant in the common case, but kept since dispatch.ts
+ * already has the id on hand to pass in.
+ */
+async function findCrossLoadAttempts(mdrCarrierId: number, excludeAttemptId?: unknown): Promise<any[]> {
+  const filter: Record<string, unknown> = {
+    carrierId: String(mdrCarrierId),
+    status: { $nin: ["scheduled", "in_progress"] },
+  };
+  if (excludeAttemptId) filter._id = { $ne: excludeAttemptId };
+  return CallAttempt.find(filter)
+    .sort({ startedAt: -1, createdAt: -1 })
+    .limit(HISTORY_LOOKBACK_LIMIT);
 }
 
 /**
@@ -50,8 +78,8 @@ async function findCrossLoadAttempts(mdrCarrierId: number): Promise<any[]> {
  * FOLLOW_UP_UNANSWERED_FIRST_MESSAGE (src/assistant/prompt.ts) without
  * duplicating this logic.
  */
-export async function hasMeaningfulPriorContact(mdrCarrierId: number): Promise<boolean> {
-  const attempts = await findCrossLoadAttempts(mdrCarrierId);
+export async function hasMeaningfulPriorContact(mdrCarrierId: number, excludeAttemptId?: unknown): Promise<boolean> {
+  const attempts = await findCrossLoadAttempts(mdrCarrierId, excludeAttemptId);
   return attempts.some(isMeaningful);
 }
 
@@ -134,19 +162,19 @@ function describeUnconnectedHistory(mostRecent: any, currentLoadId: string): str
   return `I tried reaching you ${when} about ${about} but wasn't able to get through.`;
 }
 
-export async function buildCallMemory(mdrCarrierId: number, currentLoadId: string): Promise<string> {
-  const allAttempts = await findCrossLoadAttempts(mdrCarrierId);
+export async function buildCallMemory(mdrCarrierId: number, currentLoadId: string, excludeAttemptId?: unknown): Promise<string> {
+  const allAttempts = await findCrossLoadAttempts(mdrCarrierId, excludeAttemptId);
   if (allAttempts.length === 0) return "";
 
-  // Sorted oldest-first by real time — scan from most recent backward, stop
-  // at the first meaningful one. This naturally surfaces the last real
-  // conversation even if later attempts (on this or another load) went
-  // unanswered, without mentioning those unanswered attempts alongside it.
-  const mostRecentMeaningful = [...allAttempts].reverse().find(isMeaningful);
+  // Already sorted newest-first — find the first meaningful one scanning
+  // forward. This naturally surfaces the last real conversation even if more
+  // recent attempts (on this or another load) went unanswered, without
+  // mentioning those unanswered attempts alongside it.
+  const mostRecentMeaningful = allAttempts.find(isMeaningful);
 
   if (mostRecentMeaningful) {
     return await describeMeaningfulAttempt(mostRecentMeaningful, currentLoadId);
   }
 
-  return describeUnconnectedHistory(allAttempts[allAttempts.length - 1], currentLoadId);
+  return describeUnconnectedHistory(allAttempts[0], currentLoadId);
 }

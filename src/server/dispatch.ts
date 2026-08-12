@@ -253,7 +253,7 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   try {
     existingAttempts = await CallAttempt.find({
       loadId: String(load.id),
-      carrierId: String(carrier.outreach_id),
+      outreachId: String(carrier.outreach_id),
     }).sort({ attemptNumber: 1 });
   } catch (err) {
     console.error(
@@ -360,7 +360,8 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   try {
     attempt = await CallAttempt.create({
       loadId: String(load.id),
-      carrierId: String(carrier.outreach_id),
+      outreachId: String(carrier.outreach_id),
+      carrierId: String(fresh.carrier.carrier_id),
       attemptNumber: nextAttemptNumber,
       scheduledFor,
       status: "in_progress",
@@ -388,10 +389,15 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
     // deliberately separate from existingAttempts above, which stays scoped
     // to (load, outreach_id) since cadence/MAX_CALL_ATTEMPTS are inherently
     // per-load concepts, not something to share across different loads.
-    const callMemory = await buildCallMemory(fresh.carrier.carrier_id, String(load.id));
+    // attempt._id is excluded from both lookups — the attempt created just
+    // above already exists in the DB at this point (in_progress, no
+    // callResult yet), and without excluding it a genuinely first-ever call
+    // would see its own not-yet-happened attempt reflected back as "prior
+    // history" (a real bug caught via a live call, 2026-08-12).
+    const callMemory = await buildCallMemory(fresh.carrier.carrier_id, String(load.id), attempt._id);
     const variableValues = buildCallVariables(load, fresh.carrier, callMemory, nextAttemptNumber === MAX_CALL_ATTEMPTS);
     const firstMessage = callMemory
-      ? (await hasMeaningfulPriorContact(fresh.carrier.carrier_id))
+      ? (await hasMeaningfulPriorContact(fresh.carrier.carrier_id, attempt._id))
         ? FOLLOW_UP_FIRST_MESSAGE
         : FOLLOW_UP_UNANSWERED_FIRST_MESSAGE
       : undefined;
