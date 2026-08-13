@@ -4,67 +4,107 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Everly** — an AI voice agent built on Vapi that calls freight carriers on behalf of My Dray Rate (MDR), a drayage marketplace, to collect rate quotes on loads that haven't gotten enough email responses. This repo implements MDR's own "Carrier Bid Follow-Up" playbook (the two PDFs in the repo root) as a working system: a Vapi assistant + an orchestration service that decides who to call and when.
+**Everly** — an AI voice agent built on Vapi that calls freight carriers on behalf of My Dray Rate (MDR), a drayage marketplace, to collect rate quotes on loads that haven't gotten enough email responses. This repo implements MDR's own "Carrier Bid Follow-Up" playbook (the two PDFs in the repo root) as a working system: a Vapi assistant + an Express service that decides who to call, when, and writes results back to MDR's real API.
 
 ## Commands
 
 ```bash
-npm install                # install deps
-npm run typecheck          # tsc --noEmit — run this after any change, no test suite exists yet
-npm run mock-mdr:dev        # starts the mock MDR API on $MOCK_MDR_PORT (default 4000), with reload — start this before dispatch:run/server:dev
-npm run db:reset            # clears local operational data (CallAttempt/Escalation/Load); mock carrier/quote data resets via POST /mock/reset on that service instead
-npm run assistant:create   # creates the Everly assistant in Vapi, or updates it if EVERLY_ASSISTANT_ID is set in .env
-npm run dispatch:run       # runs a single orchestration cycle (eligibility scan → queue → dial) and exits
-npm run server:dev         # starts the Express webhook receiver on $PORT (default 3000), with reload — also serves the MDR simulator UI at /simulator
+npm install               # install deps
+npm run typecheck         # tsc --noEmit — run this after any change, no test suite exists yet
+npm run server:dev        # starts the Express webhook/dispatch server on $PORT (default 3000), with reload
+npm run db:reset          # clears local CallAttempt + Quote only (dev-only) — Load/Carrier/WebhookResponse are left in place
+npm run assistant:create  # creates the Everly assistant in Vapi, or updates it if EVERLY_ASSISTANT_ID is set in .env
 ```
 
-To exercise the flow end-to-end without a real MDR system: start `mock-mdr:dev` + `server:dev`, open `http://localhost:3000/simulator`, submit a load — that fires `POST /webhooks/mdr/load-ready` and persists a local `Load` — then run `dispatch:run`.
+There is no standalone dispatch script anymore. Trigger a dispatch cycle manually:
+```bash
+curl -X POST http://localhost:3000/dispatch/run              # runs for real
+curl -X POST "http://localhost:3000/dispatch/run?dryRun=true" # full decision pipeline, zero side effects (reports would_dial)
+```
+The same logic also runs on a `node-cron` schedule inside `src/server/index.ts` — both the route and the cron job call the same exported `runDispatchCycle()`, one implementation. The cron registration is currently **commented out** (pending go-ahead), so today dispatch only fires via the manual route above.
 
-There is no lint config and no automated test suite — verification so far has been done by running the actual scripts above against the live Vapi API and a real MongoDB Atlas cluster (not mocks). When changing orchestration logic, prefer writing a throwaway script (delete it after) that runs the real flow end-to-end over trusting typecheck alone — this repo has already caught real bugs (a timezone calculation error, a Mongoose `updateOne`-on-`createdAt` no-op) that typechecking did not.
+There is no mock MDR service and no `/simulator` UI in this repo anymore (both removed) — dispatch talks to MDR's real staging API directly. There is no lint config and no automated test suite — verification is done by running the actual scripts above against the live Vapi API, MDR's real staging API, and a real MongoDB Atlas cluster. Prefer a throwaway script (delete it after) or a real live call over trusting typecheck alone — this repo has already caught real bugs (a timezone calculation error, a Mongoose `updateOne`-on-`createdAt` no-op, a cross-load call-memory self-reference bug) that typechecking did not.
 
-## Required environment (`.env`, see `.env.example`)
+## Required environment (`.env`)
 
-`VAPI_API_KEY`, `VAPI_PHONE_NUMBER_ID`, `EVERLY_ASSISTANT_ID` (set after first `assistant:create` run), `MONGODB_URI`, `MDR_API_BASE_URL`/`MDR_API_KEY`/`MDR_ACCOUNT_ID` (point at the mock MDR service by default — see Architecture below). Twilio vars are intentionally omitted until that integration starts — see `requirements-tracker.md`.
+`VAPI_API_KEY`, `VAPI_PHONE_NUMBER_ID`, `EVERLY_ASSISTANT_ID` (set after first `assistant:create` run), `ORCHESTRATION_WEBHOOK_URL` (public URL — ngrok in dev — that Vapi calls back into for tool-calls/end-of-call-report), `MONGODB_URI`, `MDR_API_BASE_URL` (MDR's real staging API: `https://staging.mydrayrate.com/api`), `MDR_API_KEY`, `MDR_WEBHOOK_SECRET`, `PORT` (default 3000), `CALLING_WINDOW_DAYS`/`CALLING_WINDOW_START_HOUR`/`CALLING_WINDOW_END_HOUR` (real values: Mon-Fri, 8-17 — sometimes temporarily widened to 0-24 in `.env` for live testing; always confirm which is currently set before trusting a dispatch run to reflect real calling hours).
 
-**Dev-phase note**: the Vapi account and MongoDB cluster currently in use are the developer's own, not the client's, and `MDR_API_BASE_URL` points at the mock MDR service (`src/mock-mdr-api/`), not the client's real API — they haven't built it yet (see `Everly_MDR_API_Workload_Timeline_Estimation.pdf`). Before Phase 2 (real MDR integration) or any real carrier call, these need to swap to the client's Vapi account, the client's real MDR API, and a Twilio number with Trust Hub business verification — tracked in `requirements-tracker.md` and `twilio-setup.md`.
+**`.env.example` is currently stale** — it still documents the removed mock-MDR setup (`MOCK_MDR_PORT`, `MDR_ACCOUNT_ID`, a `localhost:4000` base URL). Go by the real `.env` and this file, not `.env.example`, until it's refreshed. Twilio vars are intentionally omitted until that integration starts — see `twilio-setup.md`.
 
 ## Architecture
 
-**As of the 2026-07-20 client call, MDR's integration is push-based, not pull-based.** MDR calls Everly's own webhook ~30 minutes after a carrier invitation email goes out, with the load, invited carriers (id + do-not-call), and account settings all in one payload — Everly no longer polls MDR to discover work. MDR confirmed only 4 read/write endpoints exist beyond that webhook; there is no load-discovery or bare carrier-lookup endpoint. See `src/mdr/api.ts`'s header comment for the confirmed API surface, and `requirements-tracker.md` for what's still open (notably: MDR promised a "refresh" API for settings/load changes mid-outreach, exact shape TBD — don't invent it).
+MDR's integration is push-based: MDR calls Everly's own webhook with the load + invited carriers, and Everly writes results back through MDR's own per-outreach endpoints — there is no MDR polling and no separate orchestration layer. Dispatch decision logic lives directly in `src/server/`.
 
-Five layers. `src/mdr/`, `src/orchestration/`, and `src/server/` only talk to each other through the MDR API, the inbound webhook, and MongoDB — there's no direct function-call coupling between them:
+Six directories under `src/`, talking to each other only through the MDR API, the inbound webhook, and MongoDB:
 
-1. **`src/assistant/`** — defines Everly herself. `prompt.ts` is the entire conversational script (converted near-verbatim from the playbook PDF's sections 1-18), with `{{variable}}` placeholders. `tools.ts` defines the 6 function-calling tools (`submit_quote`, `log_decline`, `schedule_callback`, `escalate_to_human`, `record_do_not_call`, `update_contact`) that turn conversation into structured data. `create.ts` pushes both to Vapi via `POST/PATCH /assistant`.
+1. **`src/assistant/`** — defines Everly herself. `prompt.ts` is the entire conversational script (playbook-derived, heavily hand-tuned through many live-call iterations — treat edits here as high-risk, keep them additive) with `{{variable}}` placeholders. `tools.ts` defines 8 custom function-calling tools (see below) plus Vapi's native `endCall`. `create.ts` pushes both to Vapi via `POST`/`PATCH /assistant`.
 
-2. **`src/mdr/`** — the MDR API client (`client.ts` fetch wrapper + `api.ts` typed functions) for the 4 confirmed endpoints: quote-status, submit-quote, the combined per-(carrier,load) lookup, and do-not-call update. Today `MDR_API_BASE_URL` points at the mock service below; swapping to the client's real API later is a `MDR_API_BASE_URL`/`MDR_API_KEY` change only — no orchestration code should need to change.
+2. **`src/mdr/`** — the real MDR API client. `client.ts` is a thin fetch wrapper (`Authorization: Bearer MDR_API_KEY`) against `MDR_API_BASE_URL`. `api.ts` implements MDR's confirmed staging endpoints — writes keyed on `outreach_id`, the two lookups keyed on `carrier_id`/`load_id`:
+   - `getAllCarriers(loadId)` / `getAllCarriersBatch(loadId, batch)` — `GET /voice/load/{loadId}`, paginated (batch size 25)
+   - `getSpecificCarrier(loadId, carrierId)` — `GET /voice/load/{loadId}/carrier/{carrierId}`
+   - `declineCarrier(outreachId, reason)` — `POST /voice/decline`
+   - `stopCarrier(outreachId, reason)` — `POST /voice/stop`
+   - `resendInvitationEmail(outreachId)` — `POST /voice/email-resend`
+   - `addAccessorial(outreachId, name, price)` — `POST /voice/add-accessorials`
+   - `addWarehouse(outreachId, address)` — `POST /voice/add-warehouse`
+   - `submitCallResult(payload)` — `POST /voice/call-result` (mid-call, returns MDR's calculated total)
+   - `submitCallFinalResult(payload)` — `POST /voice/call-final-result` (after carrier confirms)
 
-3. **`src/mock-mdr-api/`** — a standalone Express service (own port, `npm run mock-mdr:dev`) implementing the 4 confirmed endpoints with in-memory fake data, plus a few extra routes (`GET /loads`, `GET /loads/:id`, bare `GET /carriers[/:id]`, account settings) that are **not** part of MDR's real API — kept only so `src/mdr-simulator-ui/` has data to read from while standing in for MDR's real system. See `src/mock-mdr-api/README.md`.
+   Known quirk: MDR's staging backend 500s if `acc_types` is sent as a real JSON array — it must be JSON-stringified first (`serializeAccTypes` in `api.ts`).
 
-4. **`src/mdr-simulator-ui/`** — a single static page (served by `server.ts` at `/simulator`) that stands in for MDR's real system: fills out a load + invited carriers + settings and fires it at Everly's own webhook, the same way MDR will once it exists. Dev-only.
+3. **`src/vapi/`** — the real Vapi API client, same thin-wrapper pattern as `mdr/`. `client.ts` is the fetch wrapper; `calls.ts` has `createOutboundCall()` (places the real call, supports a per-call `assistantOverrides.firstMessage` override) and `getCall()` (reconciliation lookup by call id).
 
-5. **`src/orchestration/`** — the decision-making pipeline, run via `dispatch:run` (intended to be invoked repeatedly/on a schedule, not long-running):
-   `eligibility.ts` (reads locally-stored open `Load`s — no MDR polling) → `queueBuilder.ts` (which invited carriers are eligible, ranked, via the per-load carrier lookup) → `cadence.ts` + `callingWindow.ts` (is this specific attempt actually due right now, timezone-aware — attempt 1 uses the webhook's `receivedAt` directly, since the email-wait window already elapsed before MDR sent it) → `dispatcher.ts` (ties it together, re-verifies the load isn't closed and the carrier isn't do-not-call with fresh API calls immediately before dialing, creates the local `CallAttempt`, places the real Vapi call) → `stopConditions.ts` (re-checked after every single call, not just per batch — reads MDR's quote-status endpoint, and syncs the local `Load.status` to `"closed"` whenever it decides to stop, since MDR doesn't push closure updates to us).
+4. **`src/db/`** — Mongoose models and connection. See Data model below.
 
-6. **`src/server/`** — `mdrWebhook.ts` receives MDR's push (`POST /webhooks/mdr/load-ready`) and upserts the local `Load`. `webhookHandlers.ts` handles Vapi's two message types: `tool-calls` (mid-call — `submit_quote` and `record_do_not_call` write through to the MDR client; `log_decline`/`schedule_callback`/`escalate_to_human` stay local only, since MDR has no endpoints for them yet; `update_contact` is a no-op/log, since MDR has no endpoint for it at all) and `end-of-call-report` (post-call transcript/recording/summary, stored locally).
+5. **`src/server/`** — the whole decision + webhook layer, one Express app:
+   - `mdrWebhook.ts` — `POST /webhooks/mdr/capture`: raw-captures every payload into `WebhookResponse` first (audit safety net, never blocks), then upserts the local `Load` from `req.body.load` and calls `getAllCarriers` to upsert local `Carrier` records.
+   - `dispatch.ts` — `POST /dispatch/run` (optional `?dryRun=true`) plus the exported `runDispatchCycle(dryRun)`. For every open local `Load` and every non-`stop_call` local `Carrier`: re-fetches fresh MDR carrier state, checks close/threshold/stop/timezone/`email_sent_at` validity, computes the next due attempt via `cadence.ts`, checks `callingWindow.ts`, creates a `CallAttempt` (idempotent — a duplicate-key race loser is treated as "already claimed," not an error), and calls `createOutboundCall`.
+   - `cadence.ts` — the confirmed attempt cadence as pure functions (attempt 1: 30 min after `email_sent_at`; attempt 2: +1hr; attempt 3: +2hr; attempt 4: next business morning). `MAX_CALL_ATTEMPTS = 4`.
+   - `callingWindow.ts` — timezone-aware calling-hours logic: `isWithinCallingWindow`, `nextCallingWindowOpen`, `nextBusinessMorning`, `wallClockToUtc` (interprets an LLM-supplied wall-clock callback time against the carrier's real MDR-sourced timezone, ignoring any offset embedded in the model's string — MDR's value is always the source of truth, never a carrier-stated one), `formatCallingWindow`.
+   - `callMemory.ts` — builds the `{{callMemory}}` prompt variable: a single natural-language sentence describing the most recent *meaningful* prior `CallAttempt` for this real carrier, queried **cross-load** by MDR's stable `carrier_id` (bounded to the last 25 attempts, backed by a `{carrierId, startedAt}` index — never a not-yet-finished attempt). Also exports `hasMeaningfulPriorContact()`, used to pick between `FOLLOW_UP_FIRST_MESSAGE`/`FOLLOW_UP_UNANSWERED_FIRST_MESSAGE` in `prompt.ts`.
+   - `callVariables.ts` — maps a `Load` + fresh MDR carrier detail + `callMemory` into every `{{variable}}` referenced in `prompt.ts`. Keep these two files in sync when either changes.
+   - `callOutcome.ts` — classifies Vapi's `endedReason` into an internal status (`completed`/`voicemail`/`no_answer`/`failed`, explicit allowlist, unrecognized reasons default to `failed` and are logged), writes transcript/recording/summary onto the `CallAttempt`.
+   - `webhookHandlers.ts` — `POST /vapi/tool-calls` handling for both Vapi message types: `tool-calls` (routes each of the 8 custom tools, see below) and `end-of-call-report` (post-call transcript/summary/recording). Resolves load/carrier/attempt context server-side by matching `message.call.id` against `CallAttempt.vapiCallId` — tool schemas deliberately never expose `loadId`/`carrierId`/`outreachId` as LLM-supplied parameters, since the model has no reliable way to know these; follow this pattern for any new tool. Every MDR call in this file uses `attempt.outreachId`, never `attempt.carrierId` (see `CallAttempt.ts`'s field comments for why the two are stored separately).
+   - `index.ts` — mounts `mdrWebhook.ts` at `/webhooks/mdr` and `dispatch.ts` at `/dispatch`, defines `POST /vapi/tool-calls` and `GET /health`, plus the (currently commented-out) cron registration.
 
-**Non-obvious design decision**: tool schemas in `tools.ts` deliberately do **not** include `loadId`/`carrierId` as LLM-supplied parameters — the model has no reliable way to know these IDs (only `carrierName` etc. are exposed as prompt variables). Instead, `webhookHandlers.ts` resolves the load/carrier/call-attempt context server-side by matching the webhook's `message.call.id` against the `CallAttempt.vapiCallId` that was recorded when the call was dispatched. If you add a new tool, follow this pattern rather than adding ID parameters back.
+6. **`src/config/`** — `env.ts`, a small required-env accessor. `mdrAccountId` is currently dead code (read but unused anywhere else) — safe to remove if you're in this file.
 
-**Idempotency**: `CallAttempt` has a unique compound index on `(loadId, carrierId, attemptNumber)`. The dispatcher relies on this — if two dispatch runs race for the same attempt slot, the loser's insert throws a duplicate-key error (code 11000), which is caught and treated as "already claimed," not an error.
+## Assistant tools (`src/assistant/tools.ts`)
 
-**Known gap, not yet fixed**: nothing currently caps how many carriers get dialed in one `dispatch:run` cycle relative to how many quotes are actually still needed — `queueBuilder.ts` returns the full eligible pool, and since `createOutboundCall()` returns before a call produces a quote, the stop-check right after a dial has nothing new to see yet. On a load with e.g. 100 invited carriers and a threshold of 20, this would currently dial through the entire eligible pool in one pass rather than stopping around the actual remaining gap.
+8 custom function-calling tools, all routed through `POST /vapi/tool-calls` → `webhookHandlers.ts`'s `dispatchTool`, plus Vapi's native `endCall`:
 
-**Data model** (`src/db/models/`): `CallAttempt` and `Escalation` are Everly's own operational/audit data, which has no MDR equivalent. `Load` is a local cache again (re-added 2026-07-20) — MDR's confirmed API has no `GET /loads`/`GET /loads/{id}`, so load details only ever arrive via the push webhook and have to be persisted or they're lost; see `src/db/models/Load.ts`'s header comment. `Carrier` is still **not** a local model — that stays API-only (`getCarrierForLoad`), since MDR does expose a live, re-fetchable endpoint for it. `Quote` **is** now local too (added 2026-07-21) — Everly writes its own audit copy in `src/db/models/Quote.ts` at submission time (before the MDR write, so a failed/flaky MDR submission still leaves proof of what was captured), for when the client needs proof of what Everly actually submitted. This is a copy for audit purposes only, not the source of truth: `getLoadQuoteStatus`/`getCarrierForLoad.hasQuoted` (which drive eligibility/threshold decisions) still read MDR's own copy (mock or real), not this one. `loadId`/`carrierId` on `CallAttempt`/`Escalation`/`Quote` are plain strings (MDR's external IDs from `src/mdr/api.ts`), not ObjectId refs. `callVariables.ts` maps a `Load`+`MdrCarrierForLoad` pair into the exact `{{variable}}` names referenced in `prompt.ts` — keep these two files in sync when either changes.
+| Tool | MDR write-through |
+|---|---|
+| `calculate_quote` | `submitCallResult` (call-result) — returns MDR's calculated total before read-back |
+| `submit_quote` | `submitCallFinalResult` (call-final-result); also flips local `Carrier.stop_call = true` |
+| `log_decline` | `declineCarrier` (decline); flips local `Carrier.stop_call = true` |
+| `record_do_not_call` | `stopCarrier` (stop); flips local `Carrier.stop_call = true` |
+| `resend_email` | `resendInvitationEmail`; flips local `Carrier.stop_call = true` |
+| `add_accessorial` | `addAccessorial` |
+| `add_warehouse` | `addWarehouse` |
+| `schedule_callback` | local only — MDR has no callback endpoint; writes `CallAttempt.callbackAt`/`callResult` |
 
-**Mongoose gotcha**: `Model.updateOne()` silently no-ops when setting a `timestamps`-managed `createdAt` field (it reports `modifiedCount: 1` but the value doesn't actually persist). Doesn't affect real application code (which never rewrites `createdAt`), but if you need to backdate a timestamp in a test script, use the raw driver instead: `Model.collection.updateOne(...)`.
+There is **no dedicated escalation tool and no live-transfer capability** — `prompt.ts`'s "Human follow-up" section explicitly reuses `schedule_callback` as the human-handoff mechanism (state the issue out loud, schedule a callback, a human at MDR follows up). Don't add `escalate_to_human`/`update_contact` — they were tried and deliberately removed; this table is the current, real tool set.
+
+## Data model (`src/db/models/`)
+
+- **`CallAttempt`** — Everly's own operational/audit record, one per dial attempt. `loadId`/`outreachId`/`carrierId` are all plain strings (MDR's external ids), not ObjectId refs. `outreachId` is what cadence/`MAX_CALL_ATTEMPTS` and every MDR write endpoint are scoped by (reissued fresh per load invitation, even for the same real carrier); `carrierId` is MDR's stable per-company id, used only by `callMemory.ts` for cross-load history — don't conflate the two. Unique compound index `{loadId, outreachId, attemptNumber}` backs idempotency; a second index `{carrierId, startedAt}` backs the cross-load memory query.
+- **`Carrier`** — a **local model** (re-added; not API-only), upserted from `getAllCarriers` on every webhook capture. Field names mirror MDR's real "Get All Carriers" response (`outreach_id`, `load_id`, `carrier_id`, `stop_call`, `calling_window`, etc.).
+- **`Load`** — local cache, upserted from MDR's real load-webhook payload — MDR has no `GET /loads` to re-fetch from, so this is the only copy.
+- **`Quote`** — Everly's own audit copy, written before the MDR write so a failed/flaky submission still leaves proof of what was captured. Field names/shape mirror MDR's real call-result/call-final-result request shape (`baseRate`, `fsc`, `storageRate`, `finalmileRate`, etc.).
+- **`WebhookResponse`** — raw-capture safety net for every inbound webhook payload, kept regardless of structured extraction. Not cleared by `db:reset`.
+
+There is **no `Escalation` model** — it was removed (nothing in the app ever wrote to it); escalation is handled via `schedule_callback` (see Assistant tools above).
+
+**Mongoose gotcha**: `Model.updateOne()` silently no-ops when setting a `timestamps`-managed `createdAt` field (reports `modifiedCount: 1` but the value doesn't persist). If you need to backdate a timestamp in a test script, use the raw driver: `Model.collection.updateOne(...)`.
 
 ## Project documentation (repo root, not code)
 
-This repo's `.md` files each cover distinct, non-overlapping ground — check whether new context belongs in one of these before creating a new file:
+Several of these are currently **stale**, still describing the removed mock-MDR/4-endpoint design — check the file itself before trusting it, or ask for it to be refreshed, rather than assuming it's current:
 
-- `project-info.md` — the full spec digest from MDR's two source PDFs
-- `client-proposal.md` — what was actually sent to the client; treat as a historical record, don't edit
-- `build-plan.md` — architecture + the phased build plan + current status of each step
-- `requirements-tracker.md` — single source of truth for confirmed config values and what's still needed from the client
-- `call-flow.md` — Mermaid diagram of the end-to-end call flow
-- `twilio-setup.md` — Twilio account/number setup steps
-- `test-cases.md` — manual test plan covering the playbook's 29 minimum test scenarios (Appendix B), including how to start the mock MDR API + webhook receiver + tunnel for live testing
+- `project-info.md` — spec digest from MDR's two source PDFs; historical record of the original ask, not of what was actually built.
+- `build-plan.md`, `requirements-tracker.md`, `test-cases.md`, `README.md` — **stale**: still reference `src/mock-mdr-api/`, `src/mdr-simulator-ui/`, `src/orchestration/`, `npm run dispatch:run`/`mock-mdr:dev`, the old 4-endpoint MDR design, and tools that don't exist (`escalate_to_human`, `update_contact`).
+- `call-flow.md` — accurate at a conceptual/playbook level; its escalation node implies live transfer, which doesn't exist (see Assistant tools above — `schedule_callback` is the real mechanism).
+- `twilio-setup.md` — accurate, pure external account/number setup checklist, not yet acted on.
+
+(No `client-proposal.md` exists in the repo despite being referenced in older docs — treat that as a dangling reference, not a missing file to look for.)
