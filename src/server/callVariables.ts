@@ -28,6 +28,22 @@ function formatCurrentDate(): string {
   return new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
+/**
+ * MDR sends several numeric fields as unformatted strings/numbers (e.g. a
+ * weight of "45445") — with no thousands separator, a real call showed this
+ * read back digit-by-digit ("four five four four five pounds") instead of as
+ * one number. Comma-formatting gives the voice model an unambiguous grouped
+ * figure to read naturally, the same way any written dollar amount or
+ * quantity normally would be. Falls back to the raw string for anything that
+ * isn't actually numeric (rare, but MDR's docs already don't always match
+ * what it sends — see Load.ts's header comment).
+ */
+function formatNumber(value: unknown, label = "unknown"): string {
+  if (value === null || value === undefined || value === "") return label;
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num.toLocaleString("en-US") : String(value);
+}
+
 /** hazmat/reefer arrive as boolean or string (per the webhook doc) — normalize either to plain "Yes"/"No" for speech. */
 function yesNo(value: unknown): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -160,13 +176,13 @@ export function buildCallVariables(
     destination: fallback(load.customer_location),
     pickupLocation: fallback(load.origin_service_location),
     deliveryLocation: fallback(load.customer_location),
-    miles: fallback(load.distance),
+    miles: formatNumber(load.distance),
 
     equipmentDescription: fallback(load.length),
     ssl: fallback(load.ssl),
     shipmentType: fallback(load.shipment_type),
     commodity: fallback(load.commodity),
-    weight: fallback(load.cargo_weight),
+    weight: formatNumber(load.cargo_weight),
     // Plain informational facts about the cargo — per client instruction,
     // these are spoken as-is and are NOT a branch condition for any other
     // question (unlike transloadNeeded/storageNeeded/finalMileNeeded below).
@@ -176,11 +192,11 @@ export function buildCallVariables(
     pickupTiming: fallback(load.load_available_date),
     lastFreeDay: fallback(load.lfd_cut),
 
-    containerQuantity: fallback(load.quantity),
+    containerQuantity: formatNumber(load.quantity),
     frequency: fallback(load.frequency_status),
     serviceScope: fallback(load.service_type),
     additionalServices: renderAdditionalServices({ transloadNeeded, storageNeeded, storageDays, storagePallets, finalMileNeeded }),
-    targetRate: fallback(load.target_rate),
+    targetRate: formatNumber(load.target_rate),
 
     specialRequirements: fallback(load.notes, "none"),
 
