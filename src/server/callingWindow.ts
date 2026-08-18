@@ -143,23 +143,6 @@ function localParts(date: Date, timezone: string) {
   };
 }
 
-/**
- * "Good morning"/"Good afternoon"/"Good evening" based on the carrier's real
- * local hour (same isValidTimezone-gated carrier_timezone every other
- * timezone-aware call already uses — never the server's own local time, see
- * wallClockToUtc's header comment for why that distinction matters here too).
- * Ordinary conversational morning/afternoon/evening boundaries (noon, 5pm) —
- * deliberately NOT tied to CALLING_WINDOW_START_HOUR/END_HOUR, which govern
- * when we're allowed to call at all, a separate concern from what a human
- * would naturally say at a given hour.
- */
-export function greetingForTimezone(timezone: string, at: Date = new Date()): string {
-  const { hour } = localParts(at, timezone);
-  if (hour < 12) return "Good morning";
-  if (hour < 17) return "Good afternoon";
-  return "Good evening";
-}
-
 export function isWithinCallingWindow(timezone: string, at: Date = new Date()): boolean {
   const { weekday, hour } = localParts(at, timezone);
   if (!BUSINESS_DAYS.has(weekday)) return false;
