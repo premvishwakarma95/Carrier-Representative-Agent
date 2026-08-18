@@ -59,11 +59,21 @@ const assistantPayload = {
     language: "en",
   },
   // startSpeakingPlan (how patiently Everly waits before she starts talking)
-  // didn't move numAssistantInterrupted at all on the next test call — the
+  // didn't move numAssistantInterrupted at all on an earlier test call — the
   // transcript showed HER speech getting cut off mid-word ("...includes the
   // CHAS Next..."), which means that metric is about her getting
-  // interrupted, not her interrupting the carrier. Left in place since a
-  // longer/smarter wait before she starts is still reasonable on its own.
+  // interrupted, not her interrupting the carrier.
+  //
+  // Reverted 5 -> 0.8 (2026-08-18): tried raising this to make Everly wait
+  // for the carrier to speak first on outbound calls, confirmed not to work
+  // on a real test call (only ~2.2s gap observed, not 5s) — Vapi's own docs
+  // define waitSeconds as governing turn-taking "after the customer pauses
+  // or finishes," not the opening of a call that hasn't started yet, so it
+  // had no effect there and only added unwanted delay to every later turn.
+  // No supported Vapi mechanism currently exists for delaying an outbound
+  // call's opening line specifically — see project memory/git history for
+  // the three confirmed-broken attempts (this one, the hook-based one, and
+  // the assistant-waits-for-user one).
   startSpeakingPlan: {
     waitSeconds: 0.8,
     smartEndpointingPlan: { provider: "vapi" },
