@@ -50,10 +50,7 @@ export const FOLLOW_UP_UNANSWERED_FIRST_MESSAGE =
   "dispatch for {{carrierName}}?";
 
 export const VOICEMAIL_MESSAGE =
-  "Hi, this is Everly, an AI assistant calling on behalf of MDR, My Dray Rate, regarding a drayage bid " +
-  "from {{origin}} to {{destination}}. MDR sent the details to {{carrierEmail}}. You can submit pricing " +
-  "through the email, or call us back at {{callbackNumber}} and reference quote {{quoteId}}. Again, this " +
-  "is Everly with MDR at {{callbackNumber}}.";
+  "Hi, this is Everly from BBL. I'll give you a call again in about an hour. Thank you.";
 
 export const SYSTEM_PROMPT = `
 # Identity
