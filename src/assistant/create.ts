@@ -12,9 +12,71 @@ import { vapi, VapiError } from "../vapi/client.js";
 import { FIRST_MESSAGE, VOICEMAIL_MESSAGE, SYSTEM_PROMPT } from "./prompt.js";
 import { TOOLS, ORCHESTRATION_WEBHOOK_URL } from "./tools.js";
 
+// "Wait for the carrier to speak first" mechanism — confirmed working across
+// several real test calls (5s/15s/25s escalation firing correctly and
+// ending the call when the carrier stays silent; correct immediate handoff
+// to the model's real opening when the carrier speaks first or responds to
+// a check-in). See git history for why this specific shape was landed on —
+// two earlier "wait for carrier to speak first" attempts already failed on
+// real calls (a hook firing near-instantly, and startSpeakingPlan.waitSeconds
+// not gating the opening at all). Investigated the earlier hook failure
+// properly this time by pulling the two real test calls' raw message
+// timestamps from Vapi directly — the hook did NOT fire at ~220ms from call
+// start as previously assumed; it fired at ~4.3-4.9s (roughly in line with
+// timeoutSeconds: 3 plus ordinary call-setup lag), but in both calls the
+// carrier's own speech had already landed 120-220ms EARLIER and didn't
+// cancel it — a race between speech-finalization and the hook's timeout
+// check, not the hook ignoring the timeoutSeconds value outright.
+// A single hook with triggerMaxCount: 3 was tried next (timeoutSeconds: 10)
+// to get 3 escalating check-ins from one hook's own repeat mechanism — a real
+// call showed that doesn't actually repeat as documented: only 1 firing
+// happened across a 43s call that had plenty of time left for 2 more.
+//
+// This attempt switches to Vapi's own documented pattern for this exact
+// scenario instead: 3 SEPARATE customer.speech.timeout hooks, each firing
+// once (triggerMaxCount: 1, not 3 — deliberately not copying the repeat
+// count from Vapi's own doc example, since that's the exact mechanism just
+// shown not to work), staggered 5s/15s/25s (client asked to move the first
+// check-in from 10s to 5s; kept the same 10s gap between stages after that).
+// The last hook's `do` list ends the call via a documented
+// `{type:"tool", tool:{type:"endCall"}}` action, run right after its "say" —
+// confirmed on a real call (endedReason: assistant-ended-call). firstMessage set to "" (not
+// FIRST_MESSAGE) to match firstMessageMode: assistant-waits-for-user's
+// documented usage — in this mode Vapi doesn't speak firstMessage at all
+// regardless of its value; the model generates its own opening from the
+// "## Opening — correct contact" section of prompt.ts once it's triggered to
+// speak (by a hook firing, or the carrier speaking first) — prompt.ts is NOT
+// touched for this test, so the {{greeting}} prefix (only wired into the
+// FIRST_MESSAGE constant, not into that section's own instructions) will not
+// be spoken in this mode — a known, accepted gap for this specific test, not
+// a new bug.
+// Tried making the closing line attempt-aware (different wording per attempt
+// number, no callback promise on the real final attempt) — reverted per
+// client instruction, back to one fixed message every time.
 const assistantPayload = {
   name: "Everly",
-  firstMessage: FIRST_MESSAGE,
+  firstMessage: "",
+  firstMessageMode: "assistant-waits-for-user",
+  hooks: [
+    {
+      on: "customer.speech.timeout",
+      options: { timeoutSeconds: 5, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
+      do: [{ type: "say", exact: "Hello? Are you there?" }],
+    },
+    {
+      on: "customer.speech.timeout",
+      options: { timeoutSeconds: 15, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
+      do: [{ type: "say", exact: "Are you still there?" }],
+    },
+    {
+      on: "customer.speech.timeout",
+      options: { timeoutSeconds: 25, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
+      do: [
+        { type: "say", exact: "I am ending this call now." },
+        { type: "tool", tool: { type: "endCall" } },
+      ],
+    },
+  ],
   voicemailMessage: VOICEMAIL_MESSAGE,
   model: {
     provider: "openai",
