@@ -18,7 +18,7 @@
 // the call, after repeated transcripts showed "Dray" rendering as "Dre"
 // (2026-07-25 client feedback: "not saying some of the verbiage correctly").
 export const FIRST_MESSAGE =
-  "[warm] Hi, this is Everly, an AI assistant calling on behalf of MDR, My Dray Rate. " +
+  "[warm] {{greeting}}! Hi, this is Everly, an AI assistant calling on behalf of MDR, My Dray Rate. " +
   "Am I speaking with the person who handles drayage pricing or dispatch for {{carrierName}}?";
 
 // Sent instead of FIRST_MESSAGE (as a per-call assistantOverrides.firstMessage,
@@ -37,7 +37,7 @@ export const FIRST_MESSAGE =
 // surfaced safely later via {{callMemory}} once identity is reconfirmed (see
 // "## Call memory" / "## Opening — correct contact" below).
 export const FOLLOW_UP_FIRST_MESSAGE =
-  "[warm] Hi, this is Everly again, calling on behalf of MDR, My Dray Rate — good to be back in touch. " +
+  "[warm] {{greeting}}! Hi, this is Everly again, calling on behalf of MDR, My Dray Rate — good to be back in touch. " +
   "Am I speaking with the person who handles drayage pricing or dispatch for {{carrierName}}?";
 
 // Same idea, but for when every prior attempt went unanswered (no_answer/
@@ -45,7 +45,7 @@ export const FOLLOW_UP_FIRST_MESSAGE =
 // happened, per the same rule enforced in callMemory.ts. Also load-neutral
 // for the same cross-load reason as FOLLOW_UP_FIRST_MESSAGE above.
 export const FOLLOW_UP_UNANSWERED_FIRST_MESSAGE =
-  "[warm] Hi, this is Everly again, calling on behalf of MDR, My Dray Rate — I wasn't able to reach " +
+  "[warm] {{greeting}}! Hi, this is Everly again, calling on behalf of MDR, My Dray Rate — I wasn't able to reach " +
   "anyone the last time I called. Am I speaking with the person who handles drayage pricing or " +
   "dispatch for {{carrierName}}?";
 
