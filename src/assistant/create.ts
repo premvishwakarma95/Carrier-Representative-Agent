@@ -53,28 +53,50 @@ import { TOOLS, ORCHESTRATION_WEBHOOK_URL } from "./tools.js";
 // Tried making the closing line attempt-aware (different wording per attempt
 // number, no callback promise on the real final attempt) — reverted per
 // client instruction, back to one fixed message every time.
+//
+// (2026-08-21) The FIRST_MESSAGE-vs-"" claim in the paragraph above is now
+// stale: dispatch.ts confirmed on a real call that a non-empty per-call
+// firstMessage override IS spoken even under this firstMessageMode, so
+// first-time calls now get FIRST_MESSAGE (with its {{greeting}} prefix)
+// passed as that override — see dispatch.ts's firstMessage selection.
+//
+// (2026-08-21) Client reported carriers getting an unwanted "Hello? Are you
+// there?" interruption — and worse, calls silently ending — in the MIDDLE of
+// a live conversation, e.g. a carrier saying "hold on a moment" while
+// checking a rate. Root cause: customer.speech.timeout fires on ANY silence
+// gap anywhere in the call, not just the opening wait — that's what the
+// event means — and triggerResetMode: "onUserSpeech" re-arms each hook's
+// trigger count every time the carrier speaks, letting it fire again on the
+// next silence gap later in the call. Vapi has no documented way to scope a
+// hook to "only before the customer's first utterance" (no elapsed-time or
+// turn-count filter exists). Per client direction: dropped the 15s/25s
+// escalation and the endCall action entirely (removes the risk of a live
+// call being cut off over a normal mid-conversation pause) and kept a single
+// hook, raised from 5s to 30s — long enough that a normal mid-call pause
+// (checking a rate, etc.) is unlikely to cross it, while still nudging a
+// carrier who never responds at all after the opening.
+//
+// (2026-08-21) A real test call still ended at ~30s of mid-conversation
+// silence even with the endCall action fully removed above — turned out to
+// be a SEPARATE Vapi mechanism entirely: silenceTimeoutSeconds, a top-level
+// assistant field (not part of hooks) that defaults to 30s and hangs up the
+// whole call on its own if no caller audio is detected for that long
+// (endedReason: "silence-timed-out"). The old 5s/15s/25s+endCall setup never
+// surfaced this because our own endCall at 25s always won the race against
+// this 30s default. Set explicitly to 60s per client direction — comfortably
+// above the single 30s "Hello? Are you there?" hook above, so the nudge is
+// just a check-in with no consequence, and the actual hang-up threshold sits
+// well past a normal pause (checking a rate, etc.).
 const assistantPayload = {
   name: "Everly",
   firstMessage: "",
   firstMessageMode: "assistant-waits-for-user",
+  silenceTimeoutSeconds: 60,
   hooks: [
     {
       on: "customer.speech.timeout",
-      options: { timeoutSeconds: 5, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
+      options: { timeoutSeconds: 30, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
       do: [{ type: "say", exact: "Hello? Are you there?" }],
-    },
-    {
-      on: "customer.speech.timeout",
-      options: { timeoutSeconds: 15, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
-      do: [{ type: "say", exact: "Are you still there?" }],
-    },
-    {
-      on: "customer.speech.timeout",
-      options: { timeoutSeconds: 25, triggerMaxCount: 1, triggerResetMode: "onUserSpeech" },
-      do: [
-        { type: "say", exact: "I am ending this call now." },
-        { type: "tool", tool: { type: "endCall" } },
-      ],
     },
   ],
   voicemailMessage: VOICEMAIL_MESSAGE,
