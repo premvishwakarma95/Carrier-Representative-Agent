@@ -61,6 +61,19 @@ function yesNo(value: unknown): string {
  * "Final Mile Delivery Required") — purely descriptive, built from the same
  * transload/storage/final-mile flags already computed below for pricing
  * branching, not a new condition of its own.
+ *
+ * Deliberately does NOT return a plain "None" for a Drayage Only load. Three
+ * real test calls showed Everly narrating that as "no transload, storage, or
+ * final mile needed" in her load summary regardless of how the surrounding
+ * prompt instructed her not to (client wants nothing said about these at all
+ * for a Drayage Only load, not even that they're not needed) — a bare
+ * "None" value reads to the model like any other field to summarize, and a
+ * separate prose rule elsewhere in the prompt wasn't reliably remembered at
+ * the point the model was actually generating the summary. Returning an
+ * instruction directly as this field's own value (instead of just data)
+ * puts the "don't mention this" rule exactly where the model is looking
+ * right as it would otherwise narrate it, rather than requiring it to recall
+ * a separate rule from elsewhere in the prompt.
  */
 function renderAdditionalServices(params: {
   transloadNeeded: string;
@@ -69,7 +82,9 @@ function renderAdditionalServices(params: {
   storagePallets: string;
   finalMileNeeded: string;
 }): string {
-  if (params.transloadNeeded !== "yes") return "None";
+  if (params.transloadNeeded !== "yes") {
+    return "N/A — do not mention transload, storage, or final mile in the summary at all, not even to say they are not needed";
+  }
   const parts = ["Transloading required"];
   if (params.storageNeeded === "yes") {
     parts.push(`warehouse storage required (${params.storageDays} days, ${params.storagePallets} pallets)`);

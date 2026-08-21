@@ -37,7 +37,7 @@ import { isWithinCallingWindow, isValidTimezone } from "./callingWindow.js";
 import { buildCallVariables } from "./callVariables.js";
 import { buildCallMemory, hasMeaningfulPriorContact } from "./callMemory.js";
 import { createOutboundCall } from "../vapi/calls.js";
-import { FOLLOW_UP_FIRST_MESSAGE, FOLLOW_UP_UNANSWERED_FIRST_MESSAGE } from "../assistant/prompt.js";
+import { FIRST_MESSAGE, FOLLOW_UP_FIRST_MESSAGE, FOLLOW_UP_UNANSWERED_FIRST_MESSAGE } from "../assistant/prompt.js";
 import { env } from "../config/env.js";
 
 export const dispatchRouter = Router();
@@ -400,7 +400,7 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
       ? (await hasMeaningfulPriorContact(fresh.carrier.carrier_id, attempt._id))
         ? FOLLOW_UP_FIRST_MESSAGE
         : FOLLOW_UP_UNANSWERED_FIRST_MESSAGE
-      : undefined;
+      : FIRST_MESSAGE;
     const call = await createOutboundCall({
       assistantId: process.env.EVERLY_ASSISTANT_ID as string,
       phoneNumberId: env.vapiPhoneNumberId,
