@@ -77,6 +77,7 @@ function yesNo(value: unknown): string {
  */
 function renderAdditionalServices(params: {
   transloadNeeded: string;
+  warehouseNeeded: string;
   storageNeeded: string;
   storageDays: string;
   storagePallets: string;
@@ -86,8 +87,11 @@ function renderAdditionalServices(params: {
     return "N/A — do not mention transload, storage, or final mile in the summary at all, not even to say they are not needed";
   }
   const parts = ["Transloading required"];
+  if (params.warehouseNeeded === "yes") {
+    parts.push("warehouse required");
+  }
   if (params.storageNeeded === "yes") {
-    parts.push(`warehouse storage required (${params.storageDays} days, ${params.storagePallets} pallets)`);
+    parts.push(`storage required (${params.storageDays} days, ${params.storagePallets} pallets)`);
   }
   if (params.finalMileNeeded === "yes") {
     parts.push("final-mile delivery required");
@@ -147,18 +151,27 @@ export function buildCallVariables(
     ? "This is the final allowed call to this carrier for this load — no further automated attempts will happen after this one."
     : "This is not the final allowed attempt — further automated attempts remain if needed.";
 
-  // Three independent gates, per client clarification — do not conflate
-  // them, each drives a different subset of the "Storage & final-mile
-  // pricing" section in prompt.ts:
+  // Four independent gates, per client clarification — do not conflate
+  // them, each drives a different subset of the "Drayage pricing capture" /
+  // "Storage & final-mile pricing" sections in prompt.ts:
   //   - transloadNeeded: is there a transload leg at all (transload_rate).
-  //     Driven by service_type, NOT storage_needed — a load can transload
-  //     without needing formal warehouse storage.
-  //   - storageNeeded: does this transload leg need warehouse storage
-  //     (is_warehouse/storage_rate/warehouse_id). Driven by the load's own
-  //     storage_needed boolean, independent of service_type's exact value.
+  //     Driven by service_type, NOT storage_needed/is_warehouse_needed — a
+  //     load can transload without needing a warehouse or formal storage.
+  //   - warehouseNeeded: does this load need a specific warehouse identified
+  //     (is_warehouse/warehouse_id, plus the base-rate phrasing and the
+  //     load-summary's "warehouse required" mention). Driven by the load's
+  //     own is_warehouse_needed boolean (2026-08-22: replaced storage_needed
+  //     as this gate's source per client direction — MDR guarantees this is
+  //     never true for a Drayage Only load, so no extra service_type check
+  //     is needed here).
+  //   - storageNeeded: does this load need a separate storage rate quoted
+  //     (storage_rate only — warehouse identification is its own gate above
+  //     now). Driven by the load's own storage_needed boolean, independent
+  //     of warehouseNeeded — a load can need one without the other.
   //   - finalMileNeeded: is there a final-mile leg on top of transload
   //     (finalmile_rate/finalmile_fsc). Driven by service_type; a load can
-  //     transload (with or without storage) without needing final mile.
+  //     transload (with or without storage/warehouse) without needing final
+  //     mile.
   // service_type is a confirmed 3-value enum (per "Voice Webhook
   // Documentation" v1.0): "Drayage Only" / "Drayage + Transloading" /
   // "Drayage + Transloading + Final Mile" — exact match, not a substring
@@ -167,6 +180,7 @@ export function buildCallVariables(
     load.service_type === "Drayage + Transloading" || load.service_type === "Drayage + Transloading + Final Mile"
       ? "yes"
       : "no";
+  const warehouseNeeded = load.is_warehouse_needed ? "yes" : "no";
   const storageNeeded = load.storage_needed ? "yes" : "no";
   const storageDays = fallback(load.storage_days);
   const storagePallets = fallback(load.storage_pallets);
@@ -217,12 +231,20 @@ export function buildCallVariables(
     containerQuantity: formatNumber(load.quantity),
     frequency: fallback(load.frequency_status),
     serviceScope: fallback(load.service_type),
-    additionalServices: renderAdditionalServices({ transloadNeeded, storageNeeded, storageDays, storagePallets, finalMileNeeded }),
+    additionalServices: renderAdditionalServices({
+      transloadNeeded,
+      warehouseNeeded,
+      storageNeeded,
+      storageDays,
+      storagePallets,
+      finalMileNeeded,
+    }),
     targetRate: formatNumber(load.target_rate),
 
     specialRequirements: fallback(load.notes, "none"),
 
     transloadNeeded,
+    warehouseNeeded,
     storageNeeded,
     storageDays,
     storagePallets,
