@@ -41,6 +41,10 @@ const loadSchema = new Schema(
     freight_status: String,
     is_load_close: Boolean,
     service_type: String,
+    // New field confirmed via a real capture (WebhookResponse
+    // 6a8939c36687310a4669e7dd, 2026-08-22) — not yet used by any prompt
+    // variable; see git history / project notes for what it should drive.
+    is_warehouse_needed: Boolean,
     // Only present when service_type includes transloading (per the API
     // doc's own note: drayage-only loads omit these entirely rather than
     // sending null) — confirmed via a real capture with
