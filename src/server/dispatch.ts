@@ -120,7 +120,9 @@ dispatchRouter.post("/run", async (req, res) => {
   res.status(result.ok ? 200 : 500).json(result);
 });
 
-async function processLoad(load: any, results: Result[], dryRun: boolean) {
+// Exported so src/server/testDispatch.ts can reuse this exact, unmodified
+// pipeline for on-demand test calls — see that file's header comment.
+export async function processLoad(load: any, results: Result[], dryRun: boolean) {
   let carriers;
   try {
     carriers = await Carrier.find({ load_id: load.id, stop_call: false }).sort({ rank: 1 });

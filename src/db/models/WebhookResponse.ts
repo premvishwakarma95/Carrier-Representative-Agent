@@ -11,6 +11,10 @@ import { Schema, model } from "mongoose";
 const webhookResponseSchema = new Schema({
   timestamp: { type: Date, required: true, default: Date.now },
   data: { type: Schema.Types.Mixed, required: true },
+  // Defaults to "live" so the real /webhooks/mdr/capture route needs no
+  // change at all — only the testing-environment endpoint ever passes
+  // "test" explicitly, to tell the two apart in this shared audit store.
+  source: { type: String, enum: ["live", "test"], required: true, default: "live" },
 });
 
 export const WebhookResponse = model("WebhookResponse", webhookResponseSchema);

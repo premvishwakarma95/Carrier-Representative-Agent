@@ -4,6 +4,7 @@ import { connectDB } from "../db/connection.js";
 import { handleToolCalls, handleEndOfCallReport } from "./webhookHandlers.js";
 import { mdrWebhookRouter } from "./mdrWebhook.js";
 import { dispatchRouter, runDispatchCycle } from "./dispatch.js";
+import { testDispatchRouter } from "./testDispatch.js";
 
 // Last-resort safety net: every route handler in this codebase is already
 // individually guarded, but this is the backstop for anything that still
@@ -28,6 +29,7 @@ app.use(express.json({ limit: "10mb" }));
 
 app.use("/webhooks/mdr", mdrWebhookRouter);
 app.use("/dispatch", dispatchRouter);
+app.use("/test", testDispatchRouter);
 
 app.post("/vapi/tool-calls", async (req, res) => {
   const message = req.body.message;
