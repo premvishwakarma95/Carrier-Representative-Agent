@@ -64,15 +64,23 @@ mdrWebhookRouter.post("/capture", async (req, res) => {
 
   try {
     const { carriers } = await getAllCarriers(load.id);
-    await Promise.all(
-      carriers.map((carrier) =>
-        Carrier.findOneAndUpdate(
-          { outreach_id: carrier.outreach_id },
-          { ...carrier, load_id: load.id },
-          { upsert: true, setDefaultsOnInsert: true }
-        )
-      )
-    );
+    // Bulk upsert, not one findOneAndUpdate per carrier: a load can have
+    // 100+ invited carriers, and firing that many concurrent round-trips at
+    // once doesn't scale (and can exhaust the connection pool). bulkWrite
+    // sends every carrier's upsert as a single command instead. Carrier.ts's
+    // schema has no `default:` fields, so dropping setDefaultsOnInsert (not
+    // available on bulkWrite) is a no-op change, not a behavior change.
+    if (carriers.length > 0) {
+      await Carrier.bulkWrite(
+        carriers.map((carrier) => ({
+          updateOne: {
+            filter: { outreach_id: carrier.outreach_id },
+            update: { $set: { ...carrier, load_id: load.id } },
+            upsert: true,
+          },
+        }))
+      );
+    }
     console.log(`webhook capture: upserted ${carriers.length} carrier(s) for load ${load.id}`);
   } catch (err) {
     console.error(`webhook capture: failed to fetch/upsert carriers for load ${load.id}:`, err);

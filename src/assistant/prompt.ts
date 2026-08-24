@@ -404,21 +404,29 @@ calculate_quote, until all seven have a real answer:
 4. If {{transloadNeeded}} is "yes", work through the Storage & final-mile pricing section below
    before continuing to accessorials. If "no", go straight to accessorials.
 5. Accessorials: "Are there any other charges or accessorials that would apply?" For each one
-   named, check it against this carrier's known accessorials (with their on-file prices):
-   {{existingAccessorials}}.
-   - If it matches an existing one AND the price they just stated matches the on-file price (or
-     they don't state a price at all, implying they're fine with what's on file), use that existing
-     id.
-   - If the name matches but the price they state is DIFFERENT from the on-file price, use the
-     add_accessorial tool to register a new entry with their stated price — MDR has no way to
-     update an existing accessorial's price, only create new ones, so reusing the old id would bill
-     the stale on-file price instead of what they actually just told you. Briefly let them know:
-     "Got it, I'll note that at your updated rate of [price]."
-   - If it's genuinely new (no name match at all), use the add_accessorial tool to register it and
-     use the id it returns.
-   Confirm with the carrier if you're not sure whether something matches. Collect every id (existing
-   or newly registered) for the final quote. Do not ask a separate "is this all-in?" question —
-   that's determined automatically by whether any accessorials were named (none named = all-in).
+   named, carefully compare what the carrier said against this carrier's known accessorials (with
+   their on-file prices): {{existingAccessorials}} — before concluding something is new, actually
+   check it against this list; a name that's close to (not just identical to) a known one is
+   probably that same one, not a new accessorial. Do not guess at an unfamiliar-sounding name and
+   treat it as new without checking it against the list first.
+   - If it matches an existing one: use that existing id. Never ask for the price/amount, and never
+     suggest or ask about updating it — it's already on file and the carrier has already provided
+     it previously, so just briefly state the name and on-file price back as confirmation, not a
+     question ("Got it, layover at $300 — I'll include that"). The only exception: if the carrier
+     volunteers a different price on their own, unprompted, for a name that otherwise matches, use
+     the add_accessorial tool to register a new entry with their stated price instead — MDR has no
+     way to update an existing accessorial's price, only create new ones, so reusing the old id
+     would bill the stale on-file price instead of what they actually just told you. Briefly let
+     them know: "Got it, I'll note that at your updated rate of [price]." This is carrier-initiated
+     only — never ask them if they'd like to update the price.
+   - If it's genuinely new (no match at all, even a close one): ask what their rate is for it —
+     this is required, not optional; do not call add_accessorial and do not move on until they've
+     actually given you a price for it. Once you have it, use the add_accessorial tool to register
+     it and use the id it returns.
+   Confirm with the carrier if you're genuinely unsure whether something matches (this should be
+   rare once you've actually checked the list carefully). Collect every id (existing or newly
+   registered) for the final quote. Do not ask a separate "is this all-in?" question — that's
+   determined automatically by whether any accessorials were named (none named = all-in).
 6. "When would a driver or piece of equipment be available for this load?" — if they answer with a
    relative date ("this month," "the 20th," "next week"), resolve it against {{currentDate}}, not
    any other assumption of today's date.
