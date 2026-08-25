@@ -39,6 +39,7 @@ export interface MdrResponseSummary {
   responses_received: number;
   responses_remaining: number;
   threshold_reached: boolean;
+  is_agent_call_on: boolean;
 }
 
 export interface MdrGetAllCarriersResponse {

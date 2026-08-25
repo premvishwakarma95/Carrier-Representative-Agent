@@ -86,3 +86,70 @@ mdrWebhookRouter.post("/capture", async (req, res) => {
     console.error(`webhook capture: failed to fetch/upsert carriers for load ${load.id}:`, err);
   }
 });
+
+/**
+ * Receiver for MDR pushing a load-level flag change (is_load_close,
+ * is_agent_call_on) without resending the whole load. Payload shape is our
+ * own best guess, not yet confirmed against a real MDR contract — built to
+ * mirror /capture's existing "event" + "load" convention (its own real
+ * payloads carry a top-level event: "load.posted"). Expect this to need
+ * adjusting once MDR provides the real spec.
+ *
+ * Deliberately does NOT upsert a missing Load — Load.quote_id is a required
+ * schema field this payload never carries, so inserting a new document from
+ * flags alone would either fail validation or need a fake placeholder value.
+ * A flag update only makes sense for a load we already know about (from a
+ * prior /capture), so a missing local Load is logged and skipped rather than
+ * forcing an invalid partial insert.
+ *
+ * $set only the fields actually present — never a full Load replace like
+ * /capture does, so a flags-only payload can't accidentally null out
+ * everything else already known about the load.
+ */
+const FLAG_UPDATE_EVENT = "load.flags_updated";
+
+mdrWebhookRouter.post("/update-flags", async (req, res) => {
+  try {
+    await WebhookResponse.create({ timestamp: new Date(), data: req.body });
+  } catch (err) {
+    console.error("webhook update-flags: failed to write raw WebhookResponse:", err);
+    res.status(500).json({ ok: false, error: "Failed to record webhook" });
+    return;
+  }
+
+  res.status(200).json({ ok: true });
+
+  const event = req.body?.event;
+  if (event && event !== FLAG_UPDATE_EVENT) {
+    // Not blocking on this — the exact event string is our own guess, not a
+    // confirmed MDR contract, so a mismatch here is logged for visibility
+    // rather than treated as a reason to drop otherwise-real flag data.
+    console.warn(`webhook update-flags: unexpected event "${event}" (expected "${FLAG_UPDATE_EVENT}") — processing anyway`);
+  }
+
+  const load = req.body?.load;
+  if (!load?.id) {
+    console.warn("webhook update-flags: no load.id present, skipping");
+    return;
+  }
+
+  const flags: Record<string, boolean> = {};
+  if (typeof load.is_load_close === "boolean") flags.is_load_close = load.is_load_close;
+  if (typeof load.is_agent_call_on === "boolean") flags.is_agent_call_on = load.is_agent_call_on;
+
+  if (Object.keys(flags).length === 0) {
+    console.warn(`webhook update-flags: no recognized flags present for load ${load.id}, skipping`);
+    return;
+  }
+
+  try {
+    const result = await Load.updateOne({ id: load.id }, { $set: flags });
+    if (result.matchedCount === 0) {
+      console.warn(`webhook update-flags: no local Load found for id ${load.id} — flags not applied`);
+      return;
+    }
+    console.log(`webhook update-flags: updated load ${load.id} with`, flags);
+  } catch (err) {
+    console.error(`webhook update-flags: failed to update Load ${load.id}:`, err);
+  }
+});

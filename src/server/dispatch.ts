@@ -79,8 +79,11 @@ export async function runDispatchCycle(dryRun: boolean): Promise<
     // result, not throw and risk leaving cycleInProgress stuck true.
     let loads;
     try {
-      // Oldest-posted loads first (FIFO).
-      loads = await Load.find({ is_load_close: false }).sort({ createdAt: 1 });
+      // Oldest-posted loads first (FIFO). is_agent_call_on: true is a strict
+      // match (not $ne: false) — safe now that the DB is being cleared, so
+      // every Load from here on is a fresh insert that gets the schema's
+      // true default, per src/db/models/Load.ts.
+      loads = await Load.find({ is_load_close: false, is_agent_call_on: true }).sort({ createdAt: 1 });
     } catch (err) {
       console.error("dispatch: failed to fetch open loads:", err);
       return { ok: false, error: `Failed to fetch open loads: ${(err as Error).message}` };
@@ -199,6 +202,16 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   // nothing about it is cached locally.
   if (fresh.response_summary?.threshold_reached) {
     results.push({ loadId: load.id, outcome: "quote_threshold_reached_skipping_rest" });
+    return true;
+  }
+
+  // MDR can toggle agent calling off for a load independent of threshold/
+  // close status. === false (not a plain falsy check) so a missing/
+  // undefined field — an older or partial MDR response — never gets
+  // mistaken for "calling disabled" and blocks real carriers; only an
+  // explicit false stops this load.
+  if (fresh.response_summary?.is_agent_call_on === false) {
+    results.push({ loadId: load.id, outcome: "agent call is off right now" });
     return true;
   }
 

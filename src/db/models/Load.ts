@@ -40,6 +40,11 @@ const loadSchema = new Schema(
     frequency_status: String,
     freight_status: String,
     is_load_close: Boolean,
+    // Local field, defaults to true on insert — distinct from MDR's own
+    // live response_summary.is_agent_call_on (which dispatch.ts checks
+    // fresh from MDR on every run, not from this stored value). Not yet
+    // wired into any decision logic — management TBD.
+    is_agent_call_on: { type: Boolean, default: true },
     service_type: String,
     // New field confirmed via a real capture (WebhookResponse
     // 6a8939c36687310a4669e7dd, 2026-08-22) — not yet used by any prompt
