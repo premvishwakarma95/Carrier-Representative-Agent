@@ -19,9 +19,10 @@
  * don't want MDR retrying indefinitely over a bug or a live-API hiccup on
  * our side.
  *
- * No auth check yet — MDR's real signing/auth scheme for this webhook isn't
- * confirmed, and rejecting on a guessed scheme would silently drop real
- * capture data during this discovery phase.
+ * Gated by the same x-api-key/TEST_DISPATCH_API_KEY shared secret as
+ * POST /test/dispatch and POST /update-flags below (reused as-is, not a
+ * separate key) — MDR's real signing/auth scheme for this webhook isn't
+ * confirmed yet, so this shared secret is what MDR must send until then.
  *
  * The old /load-ready route (built against the previous mock-based
  * push-webhook design, fed only by the now-deleted src/mdr-simulator-ui/) has
@@ -34,6 +35,12 @@ import { getAllCarriers } from "../mdr/api.js";
 export const mdrWebhookRouter = Router();
 
 mdrWebhookRouter.post("/capture", async (req, res) => {
+  const expectedKey = process.env.TEST_DISPATCH_API_KEY;
+  if (!expectedKey || req.header("x-api-key") !== expectedKey) {
+    res.status(401).json({ ok: false, error: "Missing or invalid x-api-key" });
+    return;
+  }
+
   // This is the very first thing that runs on every real MDR delivery — if
   // it throws unguarded, the rejection is unhandled and (default Node
   // behavior since v15) takes down the whole process, not just this
@@ -105,10 +112,19 @@ mdrWebhookRouter.post("/capture", async (req, res) => {
  * $set only the fields actually present — never a full Load replace like
  * /capture does, so a flags-only payload can't accidentally null out
  * everything else already known about the load.
+ *
+ * Gated by the same x-api-key/TEST_DISPATCH_API_KEY shared secret as
+ * POST /test/dispatch and /capture above (reused as-is, not a separate key).
  */
 const FLAG_UPDATE_EVENT = "load.flags_updated";
 
 mdrWebhookRouter.post("/update-flags", async (req, res) => {
+  const expectedKey = process.env.TEST_DISPATCH_API_KEY;
+  if (!expectedKey || req.header("x-api-key") !== expectedKey) {
+    res.status(401).json({ ok: false, error: "Missing or invalid x-api-key" });
+    return;
+  }
+
   try {
     await WebhookResponse.create({ timestamp: new Date(), data: req.body });
   } catch (err) {

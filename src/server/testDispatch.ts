@@ -43,8 +43,8 @@ testDispatchRouter.post("/dispatch", async (req, res) => {
   const dryRun = req.query.dryRun === "true" || req.query.dryRun === "1";
 
   const expectedKey = process.env.TEST_DISPATCH_API_KEY;
-  if (!expectedKey || req.header("x-test-api-key") !== expectedKey) {
-    res.status(401).json({ ok: false, error: "Missing or invalid x-test-api-key" });
+  if (!expectedKey || req.header("x-api-key") !== expectedKey) {
+    res.status(401).json({ ok: false, error: "Missing or invalid x-api-key" });
     return;
   }
 
