@@ -136,9 +136,18 @@ function localParts(date: Date, timezone: string) {
   const parts = formatter.formatToParts(date);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
 
+  // Node 20's ICU (confirmed on production, v20.20.2/ICU 78.2 — not
+  // reproducible on a newer Node) formats local midnight as hour "24"
+  // instead of "00" with hour12: false. Invisible under the real calling
+  // window (END_HOUR=17, where 24 is already out of range either way), but
+  // with END_HOUR=24 (used for on-demand testing) it wrongly excludes every
+  // carrier for the midnight-to-~1am local hour, every day: 24 < 24 is
+  // false. Normalize back to 0 so both mean the same real instant.
+  const rawHour = parseInt(get("hour"), 10);
+
   return {
     weekday: get("weekday"),
-    hour: parseInt(get("hour"), 10),
+    hour: rawHour === 24 ? 0 : rawHour,
     minute: parseInt(get("minute"), 10),
   };
 }
