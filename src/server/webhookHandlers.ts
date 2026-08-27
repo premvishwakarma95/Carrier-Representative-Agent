@@ -420,6 +420,10 @@ export async function handleEndOfCallReport(message: any) {
     transcript: message.artifact?.transcript,
     recordingUrl: message.artifact?.recording?.stereoUrl,
     summary: message.summary ?? message.analysis?.summary,
+    // Vapi's OWN call-connect/call-end timestamps, not this webhook's
+    // arrival time — see computeDurationSeconds in callOutcome.ts.
+    vapiStartedAt: message.startedAt,
+    vapiEndedAt: message.endedAt,
   });
 
   await attempt.save();

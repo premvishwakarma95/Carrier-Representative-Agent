@@ -50,6 +50,24 @@ export function classifyCallStatus(endedReason: string | undefined): CallStatus 
   return "failed";
 }
 
+/**
+ * Real conversation time only, in whole seconds — from Vapi's OWN reported
+ * call-start/call-end timestamps (the call actually connecting to actually
+ * ending), never this app's own dispatch-time/webhook-receipt-time
+ * timestamps. Confirmed via a real completed call (2026-08-26): our own
+ * startedAt/endedAt overstated the real duration by ~32% (57.6s vs Vapi's
+ * real 43.8s) — ring/setup time on one end, webhook-delivery latency on the
+ * other. Missing/invalid/non-positive input (never connected: no_answer,
+ * failed, etc. — Vapi doesn't report real call timestamps for those) -> 0.
+ */
+function computeDurationSeconds(startedAt?: string, endedAt?: string): number {
+  if (!startedAt || !endedAt) return 0;
+  const start = new Date(startedAt).getTime();
+  const end = new Date(endedAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return Math.round((end - start) / 1000);
+}
+
 export function applyCallOutcome(
   attempt: HydratedDocument<any>,
   data: {
@@ -57,6 +75,8 @@ export function applyCallOutcome(
     transcript?: string;
     recordingUrl?: string;
     summary?: string;
+    vapiStartedAt?: string;
+    vapiEndedAt?: string;
   }
 ) {
   attempt.transcript = data.transcript;
@@ -64,6 +84,7 @@ export function applyCallOutcome(
   attempt.summary = data.summary;
   attempt.endedReason = data.endedReason;
   attempt.endedAt = new Date();
+  attempt.durationSeconds = computeDurationSeconds(data.vapiStartedAt, data.vapiEndedAt);
 
   if (attempt.status === "in_progress") {
     attempt.status = classifyCallStatus(data.endedReason);

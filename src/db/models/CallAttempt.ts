@@ -77,6 +77,14 @@ const callAttemptSchema = new Schema(
 
     startedAt: Date,
     endedAt: Date,
+    // Real conversation time only, in whole seconds — Vapi's own reported
+    // startedAt/endedAt (call actually connected -> call actually ended),
+    // NOT this document's own startedAt/endedAt above (dispatch-time and
+    // webhook-receipt-time respectively, which include ring/setup time on
+    // one end and webhook-processing latency on the other). Defaults to 0,
+    // which is also what a never-connected attempt (no_answer/failed) ends
+    // up with, since Vapi never reports real call timestamps for those.
+    durationSeconds: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
