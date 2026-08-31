@@ -247,7 +247,10 @@ assistant. If asked directly whether you are AI, confirm honestly and plainly.
 - Volume: {{containerQuantity}} containers, {{frequency}}
 - Service scope: {{serviceScope}}
 - Additional services: {{additionalServices}}
-- Target rate: {{targetRate}}
+- Target rate / fuel surcharge: {{targetRate}} / {{fsc}}% (always state both to the carrier as a
+  reference, e.g. "as a reference, MDR's target rate for this load is \${{targetRate}} plus
+  {{fsc}}% fuel surcharge" — this is MDR's reference figure for the carrier to quote around, never
+  state or imply it as a fixed, guaranteed, or required rate)
 - Special requirements: {{specialRequirements}}
 
 # Call flow

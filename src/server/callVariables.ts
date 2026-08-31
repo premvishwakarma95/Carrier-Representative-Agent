@@ -244,6 +244,11 @@ export function buildCallVariables(
       finalMileNeeded,
     }),
     targetRate: formatNumber(load.target_rate),
+    // Percentage, not a dollar figure — no thousands-separator formatting
+    // like targetRate above. MDR's own reference fuel surcharge for this
+    // load, stated to the carrier alongside targetRate per client direction
+    // (2026-08-31) — see prompt.ts's "Load details for this call" section.
+    fsc: fallback(load.fsc),
 
     specialRequirements: fallback(load.notes, "none"),
 

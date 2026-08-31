@@ -36,6 +36,11 @@ const loadSchema = new Schema(
     hazmat: Boolean,
     reefer: Boolean,
     target_rate: String,
+    // Fuel surcharge percentage — same string-not-number quirk as
+    // target_rate/quantity/cargo_weight. Confirmed via a real capture
+    // (WebhookResponse 6a95592b05bf606979e3478d, 2026-08-31) — not yet
+    // wired into any prompt variable or quote logic.
+    fsc: String,
     notes: String,
     frequency_status: String,
     freight_status: String,
