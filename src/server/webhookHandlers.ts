@@ -17,7 +17,7 @@
  * orchestration-flow rebuild, not this file.
  */
 import { CallAttempt, Quote, Carrier } from "../db/models/index.js";
-import { applyCallOutcome } from "./callOutcome.js";
+import { applyCallOutcome, formatDurationMmSs, mapToMdrCallLogStatus } from "./callOutcome.js";
 import { MAX_CALL_ATTEMPTS } from "./cadence.js";
 import { isWithinCallingWindow, isValidTimezone, formatCallingWindow, wallClockToUtc } from "./callingWindow.js";
 import {
@@ -28,6 +28,7 @@ import {
   addWarehouse as mdrAddWarehouse,
   submitCallResult as mdrSubmitCallResult,
   submitCallFinalResult as mdrSubmitCallFinalResult,
+  submitCallLog as mdrSubmitCallLog,
 } from "../mdr/api.js";
 import type { HydratedDocument } from "mongoose";
 
@@ -374,6 +375,12 @@ async function resendEmail(_params: any, { attempt }: CallContext) {
   // outer catch and get reported to Everly rather than being swallowed.
   const result = await mdrResendInvitationEmail(Number(attempt.outreachId));
 
+  // Recorded here (not just the Carrier.stop_call flip below) so this call
+  // can be told apart from a plain connected call with nothing concluded —
+  // needed for MDR's own EMAIL_REQUESTED call-log status at end-of-call.
+  attempt.callResult = "email_requested";
+  await attempt.save();
+
   // Choosing to quote by email means this carrier isn't expecting another
   // phone call for this load — same reasoning as log_decline/
   // record_do_not_call: without this, dispatch.ts's cadence has nothing
@@ -427,6 +434,53 @@ export async function handleEndOfCallReport(message: any) {
   });
 
   await attempt.save();
+
+  // MDR's Call Log API (spec received 2026-08-27) — logs ended calls to
+  // MDR's own system, restricted to their fixed 6-value status vocabulary
+  // (see mapToMdrCallLogStatus's header comment for what's covered and
+  // what's deliberately skipped). Fires for /test/dispatch calls too (same
+  // handleEndOfCallReport path, no special-casing) per explicit
+  // instruction. Best-effort: MDR's own logging is auxiliary, must never
+  // block or fail this webhook's own processing above.
+  //
+  // Guarded by mdrCallLogSubmittedAt so this only ever fires once per call —
+  // this whole handler is fully awaited before responding 200 to Vapi, so a
+  // slow response here could cause Vapi to retry the same end-of-call-report
+  // webhook and re-run this function for the same call.
+  if (attempt.mdrCallLogSubmittedAt) {
+    console.log(`end-of-call-report: call log already submitted to MDR for outreach_id ${attempt.outreachId} at ${attempt.mdrCallLogSubmittedAt.toISOString()} — skipping duplicate push`);
+  } else {
+    const mdrCallLogStatus = mapToMdrCallLogStatus(attempt);
+    if (mdrCallLogStatus) {
+      try {
+        const result = await mdrSubmitCallLog({
+          outreach_id: Number(attempt.outreachId),
+          call_id: vapiCallId,
+          status: mdrCallLogStatus,
+          duration: formatDurationMmSs(attempt.durationSeconds ?? 0),
+          data: {
+            direction: "outbound",
+            started_at: message.startedAt,
+            ended_at: message.endedAt,
+            recording_url: attempt.recordingUrl,
+            provider: "vapi",
+            call_result: attempt.callResult,
+            ended_reason: attempt.endedReason,
+          },
+        });
+        attempt.mdrCallLogSubmittedAt = new Date();
+        await attempt.save();
+        console.log(`end-of-call-report: submitted call log to MDR for outreach_id ${attempt.outreachId} (status=${mdrCallLogStatus}):`, result);
+      } catch (err) {
+        console.error(`end-of-call-report: failed to submit call log to MDR for outreach_id ${attempt.outreachId}:`, err);
+      }
+    } else {
+      console.log(
+        `end-of-call-report: no MDR call-log status equivalent for outreach_id ${attempt.outreachId} (status=${attempt.status}, callResult=${attempt.callResult}) — skipping call-log push`
+      );
+    }
+  }
+
   // Stop-condition re-check disabled pending rebuild — see the PENDING
   // REBUILD note at the top of this file.
 

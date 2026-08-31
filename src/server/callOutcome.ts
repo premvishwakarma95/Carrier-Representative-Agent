@@ -68,6 +68,58 @@ function computeDurationSeconds(startedAt?: string, endedAt?: string): number {
   return Math.round((end - start) / 1000);
 }
 
+/**
+ * MM:SS, per MDR's Call Log API spec (e.g. "03:05") — built from the same
+ * durationSeconds computed above, not a separate calculation. Zero-padded
+ * to 2 digits each side; minutes are not capped (a 61-minute call renders
+ * "61:00", not wrapped into an hours component — the spec only shows MM:SS).
+ */
+export function formatDurationMmSs(durationSeconds: number): string {
+  const minutes = Math.floor(durationSeconds / 60);
+  const seconds = durationSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * Maps our own CallAttempt.status/callResult onto MDR's fixed 6-value Call
+ * Log status vocabulary (see MdrCallLogStatus in mdr/api.ts). Returns null
+ * for outcomes with no honest equivalent among those 6 — the caller should
+ * skip the MDR call-log push entirely in that case rather than force a
+ * misleading value onto MDR's system:
+ *   - "do_not_call": opted out of ALL future contact, a broader/different
+ *     fact than DECLINED (which per MDR's own definition means declining
+ *     THIS load specifically)
+ *   - "failed": the call itself errored out — not a real conversation,
+ *     nothing to honestly report as a business outcome
+ *   - "wrong_number": no equivalent in MDR's list
+ *   - a connected call where no tool ever fired (nothing was concluded)
+ * "escalation" (human handoff, also via schedule_callback per this
+ * codebase's design — see CLAUDE.md's Assistant tools section) maps to
+ * FOLLOW_UP_REQUIRED alongside plain "callback", since both mean someone
+ * needs to follow up. "conditional_quote" maps to ACCEPTED: MDR's own
+ * definition of ACCEPTED is "if quoted by call", which is still true
+ * whether or not conditions were attached to that quote.
+ */
+export function mapToMdrCallLogStatus(attempt: HydratedDocument<any>): import("../mdr/api.js").MdrCallLogStatus | null {
+  if (attempt.status === "no_answer") return "NO_ANSWER";
+  if (attempt.status === "voicemail") return "LEFT_VOICEMAIL";
+
+  switch (attempt.callResult) {
+    case "declined":
+      return "DECLINED";
+    case "quote_received":
+    case "conditional_quote":
+      return "ACCEPTED";
+    case "callback":
+    case "escalation":
+      return "FOLLOW_UP_REQUIRED";
+    case "email_requested":
+      return "EMAIL_REQUESTED";
+    default:
+      return null;
+  }
+}
+
 export function applyCallOutcome(
   attempt: HydratedDocument<any>,
   data: {

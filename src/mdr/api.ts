@@ -274,3 +274,49 @@ export function submitCallFinalResult(payload: MdrCallFinalResultRequest): Promi
     acc_types: serializeAccTypes(payload.acc_types),
   });
 }
+
+/**
+ * MDR's own fixed business-outcome vocabulary for the Call Log API (spec
+ * received 2026-08-27), confirmed exhaustive — nothing outside these 6
+ * values should ever be sent. Mapped from our CallAttempt.status/callResult
+ * in callOutcome.ts's mapToMdrCallLogStatus, which returns null (skip the
+ * push entirely) for our own outcomes that have no honest equivalent here
+ * (do_not_call, failed, wrong_number, a connected call where nothing was
+ * concluded) rather than force one of these 6 onto something that doesn't
+ * fit.
+ */
+export type MdrCallLogStatus =
+  | "NO_ANSWER"
+  | "LEFT_VOICEMAIL"
+  | "FOLLOW_UP_REQUIRED"
+  | "EMAIL_REQUESTED"
+  | "ACCEPTED"
+  | "DECLINED";
+
+export interface MdrCallLogRequest {
+  outreach_id: number;
+  call_id: string;
+  status: MdrCallLogStatus;
+  // MM:SS, per MDR's spec (e.g. "03:05") — see formatDurationMmSs in
+  // callOutcome.ts, built from the same real Vapi timestamps as
+  // CallAttempt.durationSeconds.
+  duration: string;
+  data?: Record<string, unknown>;
+}
+
+export interface MdrCallLogResponse {
+  success?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Voice Team API Integration — Call Log API (spec received 2026-08-27, not
+ * yet exercised against staging). Called once per ended call (connected or
+ * not) so MDR's own system has a record of every attempt, not just
+ * successful ones — separate from and in addition to the decline/stop/
+ * call-result endpoints above, which report business outcomes rather than
+ * raw call logs.
+ */
+export function submitCallLog(payload: MdrCallLogRequest): Promise<MdrCallLogResponse> {
+  return mdr.post<MdrCallLogResponse>("/voice/call-logs", payload);
+}

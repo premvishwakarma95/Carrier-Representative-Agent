@@ -55,6 +55,13 @@ const callAttemptSchema = new Schema(
         "declined",
         "do_not_call",
         "escalation",
+        // Set by resend_email — was previously untracked (that tool only
+        // flipped Carrier.stop_call), so a call where the carrier asked to
+        // quote by email was indistinguishable from a plain connected call
+        // with nothing concluded. Needed to report MDR's own
+        // EMAIL_REQUESTED call-log status accurately (see callOutcome.ts's
+        // mapToMdrCallLogStatus).
+        "email_requested",
       ],
     },
 
@@ -85,6 +92,15 @@ const callAttemptSchema = new Schema(
     // which is also what a never-connected attempt (no_answer/failed) ends
     // up with, since Vapi never reports real call timestamps for those.
     durationSeconds: { type: Number, default: 0 },
+    // Set once MDR's Call Log API push succeeds — guards against sending
+    // it twice for the same call. Vapi's end-of-call-report webhook is
+    // fully awaited before we respond 200 (see index.ts), so a slow
+    // response could cause Vapi to retry the same webhook and re-run
+    // handleEndOfCallReport; MDR's own API already rejects a duplicate
+    // call_id (confirmed empirically, 2026-08-31: a 409 "This call ID has
+    // already been processed"), but that's a defense on their side, not a
+    // reason to skip guarding our own retry attempt from firing at all.
+    mdrCallLogSubmittedAt: Date,
   },
   { timestamps: true }
 );
