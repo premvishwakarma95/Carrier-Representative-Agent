@@ -81,24 +81,26 @@ export function formatDurationMmSs(durationSeconds: number): string {
 }
 
 /**
- * Maps our own CallAttempt.status/callResult onto MDR's fixed 6-value Call
- * Log status vocabulary (see MdrCallLogStatus in mdr/api.ts). Returns null
- * for outcomes with no honest equivalent among those 6 — the caller should
- * skip the MDR call-log push entirely in that case rather than force a
- * misleading value onto MDR's system:
+ * Maps our own CallAttempt.status/callResult onto MDR's fixed Call Log
+ * status vocabulary (see MdrCallLogStatus in mdr/api.ts). Returns null for
+ * outcomes with no honest equivalent even including CALL_DROPPED — the
+ * caller should skip the MDR call-log push entirely in that case rather
+ * than force a misleading value onto MDR's system:
  *   - "do_not_call": opted out of ALL future contact, a broader/different
  *     fact than DECLINED (which per MDR's own definition means declining
  *     THIS load specifically)
  *   - "failed": the call itself errored out — not a real conversation,
  *     nothing to honestly report as a business outcome
  *   - "wrong_number": no equivalent in MDR's list
- *   - a connected call where no tool ever fired (nothing was concluded)
  * "escalation" (human handoff, also via schedule_callback per this
  * codebase's design — see CLAUDE.md's Assistant tools section) maps to
  * FOLLOW_UP_REQUIRED alongside plain "callback", since both mean someone
  * needs to follow up. "conditional_quote" maps to ACCEPTED: MDR's own
  * definition of ACCEPTED is "if quoted by call", which is still true
- * whether or not conditions were attached to that quote.
+ * whether or not conditions were attached to that quote. "connected" (a
+ * real conversation happened but no tool ever fired — the carrier hung up
+ * before reaching any conclusion) maps to CALL_DROPPED, confirmed on a real
+ * test call (2026-08-31) where this previously fell through to null.
  */
 export function mapToMdrCallLogStatus(attempt: HydratedDocument<any>): import("../mdr/api.js").MdrCallLogStatus | null {
   if (attempt.status === "no_answer") return "NO_ANSWER";
@@ -115,6 +117,8 @@ export function mapToMdrCallLogStatus(attempt: HydratedDocument<any>): import(".
       return "FOLLOW_UP_REQUIRED";
     case "email_requested":
       return "EMAIL_REQUESTED";
+    case "connected":
+      return "CALL_DROPPED";
     default:
       return null;
   }

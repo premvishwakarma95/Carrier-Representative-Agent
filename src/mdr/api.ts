@@ -277,13 +277,15 @@ export function submitCallFinalResult(payload: MdrCallFinalResultRequest): Promi
 
 /**
  * MDR's own fixed business-outcome vocabulary for the Call Log API (spec
- * received 2026-08-27), confirmed exhaustive — nothing outside these 6
- * values should ever be sent. Mapped from our CallAttempt.status/callResult
- * in callOutcome.ts's mapToMdrCallLogStatus, which returns null (skip the
- * push entirely) for our own outcomes that have no honest equivalent here
- * (do_not_call, failed, wrong_number, a connected call where nothing was
- * concluded) rather than force one of these 6 onto something that doesn't
- * fit.
+ * received 2026-08-27) plus CALL_DROPPED, added 2026-08-31 per explicit
+ * instruction to cover a connected call the carrier hung up on before
+ * reaching any conclusive outcome — confirmed on a real test call, MDR's
+ * original 6 values had no honest equivalent for that case. Mapped from our
+ * CallAttempt.status/callResult in callOutcome.ts's mapToMdrCallLogStatus,
+ * which still returns null (skip the push entirely) for outcomes that
+ * remain a poor fit even with CALL_DROPPED available (do_not_call, failed,
+ * wrong_number) rather than force one of these 7 onto something that
+ * doesn't fit.
  */
 export type MdrCallLogStatus =
   | "NO_ANSWER"
@@ -291,7 +293,8 @@ export type MdrCallLogStatus =
   | "FOLLOW_UP_REQUIRED"
   | "EMAIL_REQUESTED"
   | "ACCEPTED"
-  | "DECLINED";
+  | "DECLINED"
+  | "CALL_DROPPED";
 
 export interface MdrCallLogRequest {
   outreach_id: number;
