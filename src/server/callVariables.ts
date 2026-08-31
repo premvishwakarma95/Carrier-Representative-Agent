@@ -11,7 +11,7 @@
  * Keep this in sync whenever prompt.ts's placeholders change.
  */
 import type { MdrCarrierDetail } from "../mdr/api.js";
-import { greetingForTimezone, isValidTimezone } from "./callingWindow.js";
+import { greetingForTimezone, formatCurrentTime, isValidTimezone } from "./callingWindow.js";
 
 function fallback(value: unknown, label = "unknown"): string {
   if (value === null || value === undefined || value === "") return label;
@@ -141,6 +141,9 @@ export function buildCallVariables(
   // call (see its isValidTimezone gate), so this fallback is defensive-only —
   // never expected to actually trigger on a real dial.
   const greeting = isValidTimezone(carrier.carrier_timezone) ? greetingForTimezone(carrier.carrier_timezone) : "Hello";
+  const currentTime = isValidTimezone(carrier.carrier_timezone)
+    ? formatCurrentTime(carrier.carrier_timezone)
+    : "unknown";
 
   // Rendered as a complete statement, same reasoning as callMemory above —
   // Vapi substitutes {{attemptStatus}} as literal text, so a bare boolean
@@ -188,6 +191,7 @@ export function buildCallVariables(
 
   return {
     currentDate,
+    currentTime,
     greeting,
 
     // Populated by src/server/callMemory.ts, computed by dispatch.ts before

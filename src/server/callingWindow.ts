@@ -169,6 +169,25 @@ export function greetingForTimezone(timezone: string, at: Date = new Date()): st
   return "Good evening";
 }
 
+/**
+ * "10:49 AM"-style current clock time in the carrier's real local timezone —
+ * same gap class as currentDate in callVariables.ts (added after a real call
+ * showed the model resolving relative dates against the wrong year with no
+ * anchor), one level more granular: nothing previously told the model what
+ * time it actually is right now, so a carrier's relative callback request
+ * ("call me in 13 minutes") had no real anchor to compute against. Confirmed
+ * root cause of a real test call (2026-08-31): asked to schedule a callback
+ * "in 13 minutes," the model instead anchored to its own earlier
+ * conversational guess of a clock time and added the offset to THAT instead
+ * of the actual current time, landing the callback ~7h45m off target.
+ */
+export function formatCurrentTime(timezone: string, at: Date = new Date()): string {
+  const { hour, minute } = localParts(at, timezone);
+  const period = hour >= 12 ? "PM" : "AM";
+  const twelveHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelveHour}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
 export function isWithinCallingWindow(timezone: string, at: Date = new Date()): boolean {
   const { weekday, hour } = localParts(at, timezone);
   if (!BUSINESS_DAYS.has(weekday)) return false;
