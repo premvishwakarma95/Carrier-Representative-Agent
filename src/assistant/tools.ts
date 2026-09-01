@@ -60,7 +60,13 @@ const quoteFieldProperties = {
       "ids of every accessorial that applies — existing matched ids plus any newly registered via " +
       "add_accessorial. Empty array if none.",
   },
-  transload_rate: { type: "number", description: "only if this load needs storage" },
+  transload_rate: {
+    type: "number",
+    description:
+      "only if this load needs transload. The TOTAL cost across all containers on this load, not " +
+      "a per-container rate — always ask the carrier for the total covering every container, not a " +
+      "per-unit figure.",
+  },
   finalmile_rate: { type: "number", description: "only if this load needs storage" },
   finalmile_fsc: { type: "number", description: "only if this load needs storage" },
   // Vapi's schema validator rejects a numeric enum ([0, 1]) on a "number"
