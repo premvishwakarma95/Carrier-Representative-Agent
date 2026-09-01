@@ -100,6 +100,28 @@ const assistantPayload = {
     },
   ],
   voicemailMessage: VOICEMAIL_MESSAGE,
+  // Without this, Vapi never actually detects voicemail on its own — a real
+  // test call (2026-09-01) confirmed the assistant just spoke its normal
+  // live-call opening straight into a voicemail box and the call silently
+  // timed out (endedReason: "silence-timed-out") instead of using
+  // voicemailMessage above. First landed on provider: "twilio" (matches our
+  // telephony provider) — that DID correctly classify the call as voicemail,
+  // but two consecutive real test calls showed the assistant's normal
+  // live-call opening still got spoken immediately and then hard-interrupted
+  // mid-word once detection resolved, splicing it together with
+  // voicemailMessage into one garbled recording. Per Vapi's own docs,
+  // provider: "twilio" is legacy with no tuning controls; switched to
+  // provider: "vapi" (their recommended option) specifically for
+  // beepMaxAwaitSeconds, which holds the assistant silent — not speaking
+  // FIRST_MESSAGE at all — until either the beep is detected (then speaks
+  // cleanly right after) or this timeout passes. Kept at 20s per Vapi's own
+  // guidance not to go below ~15-20s, since most voicemail greetings run
+  // that long before the beep.
+  voicemailDetection: {
+    provider: "vapi",
+    backoffPlan: { startAtSeconds: 2, frequencySeconds: 2.5, maxRetries: 5 },
+    beepMaxAwaitSeconds: 20,
+  },
   model: {
     provider: "openai",
     model: "gpt-4.1",
