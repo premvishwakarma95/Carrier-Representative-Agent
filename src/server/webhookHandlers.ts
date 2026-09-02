@@ -101,6 +101,10 @@ async function dispatchTool(name: string, params: Record<string, any>, context: 
       return recordDoNotCall(params, context);
     case "resend_email":
       return resendEmail(params, context);
+    case "confirm_email_quote":
+      return confirmEmailQuote(params, context);
+    case "resume_phone_quote":
+      return resumePhoneQuote(params, context);
     case "add_accessorial":
       return addAccessorialTool(params, context);
     case "add_warehouse":
@@ -387,11 +391,23 @@ async function resendEmail(_params: any, { attempt }: CallContext) {
   // No fallback here — unlike decline/stop, there's no local state to fall
   // back on if this fails, so let a failure propagate to handleToolCalls'
   // outer catch and get reported to Everly rather than being swallowed.
+  //
+  // Deliberately does NOT touch callResult/Carrier.stop_call — a resend on
+  // its own is not a decision to quote by email (e.g. Opening's "haven't
+  // received it" branch). See confirmEmailQuote below, which is the
+  // separate tool call that actually records that decision — a real call
+  // (2026-09-02) showed conflating the two (via a quoting_by_email flag on
+  // this same tool) missed the "use the email I already have" case
+  // entirely, since that path never calls resend_email at all.
   const result = await mdrResendInvitationEmail(Number(attempt.outreachId));
+  return { ok: true, message: result.message };
+}
 
-  // Recorded here (not just the Carrier.stop_call flip below) so this call
-  // can be told apart from a plain connected call with nothing concluded —
-  // needed for MDR's own EMAIL_REQUESTED call-log status at end-of-call.
+async function confirmEmailQuote(_params: any, { attempt }: CallContext) {
+  // Recorded here so this call can be told apart from a plain connected
+  // call with nothing concluded — needed for MDR's own EMAIL_REQUESTED
+  // call-log status at end-of-call. See mapToMdrCallLogStatus in
+  // callOutcome.ts.
   attempt.callResult = "email_requested";
   await attempt.save();
 
@@ -399,20 +415,50 @@ async function resendEmail(_params: any, { attempt }: CallContext) {
   // phone call for this load — same reasoning as log_decline/
   // record_do_not_call: without this, dispatch.ts's cadence has nothing
   // that knows they already chose a different channel, so attempts 2-4
-  // would otherwise still get scheduled and dialed. Best-effort, same
-  // pattern as those two — doesn't affect this tool's own success if it
-  // fails, and dispatch.ts still re-checks fresh against MDR before ever
-  // dialing regardless.
+  // would otherwise still get scheduled and dialed. Best-effort — doesn't
+  // affect this tool's own success if it fails, and dispatch.ts still
+  // re-checks fresh against MDR before ever dialing regardless.
   try {
     await Carrier.updateOne(
       { outreach_id: Number(attempt.outreachId) },
       { stop_call: true, stop_reason: "Chose to submit quote by email" }
     );
   } catch (err) {
-    console.error(`resend_email: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
+    console.error(`confirm_email_quote: failed to update local Carrier.stop_call for ${attempt.outreachId}:`, err);
   }
 
-  return { ok: true, message: result.message };
+  return { ok: true };
+}
+
+async function resumePhoneQuote(_params: any, { attempt }: CallContext) {
+  // Undoes confirmEmailQuote's callResult — a carrier who reverses back to
+  // phone hasn't actually decided anything final yet; if a real quote gets
+  // collected and submitted after this, submit_quote overwrites callResult
+  // again as normal. If instead the call ends before that (e.g. it drops
+  // mid-collection), clearing this back to unset lets applyCallOutcome's
+  // own end-of-call fallback classify it normally (typically "connected",
+  // which maps to CALL_DROPPED in MDR's call log — see
+  // mapToMdrCallLogStatus) instead of leaving the stale "email_requested"
+  // value from the decision they walked back. Per client direction
+  // (2026-09-02): only report EMAIL_REQUESTED for an actual final decision
+  // to quote by email, never a reversed one.
+  attempt.callResult = undefined;
+  await attempt.save();
+
+  // Symmetric with confirmEmailQuote's stop_call flip — they may still get
+  // a real quote submitted on a future automated attempt if this call
+  // doesn't finish one, so don't leave them marked as having chosen a
+  // different channel. Best-effort, same reasoning as confirmEmailQuote.
+  try {
+    await Carrier.updateOne(
+      { outreach_id: Number(attempt.outreachId) },
+      { stop_call: false, stop_reason: null }
+    );
+  } catch (err) {
+    console.error(`resume_phone_quote: failed to reset local Carrier.stop_call for ${attempt.outreachId}:`, err);
+  }
+
+  return { ok: true };
 }
 
 async function addAccessorialTool(params: any, { attempt }: CallContext) {
