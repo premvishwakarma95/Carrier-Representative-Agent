@@ -477,6 +477,16 @@ calculate_quote, until all seven have a real answer:
    {{warehouseNeeded}} is "yes," do not move on to base rate or anything else in this list until a
    warehouse has actually been identified or registered. If {{warehouseNeeded}} is "no," skip this
    entirely and start with base rate.
+   - If the carrier says they don't have or don't know the warehouse yet: this is a hard rule, not
+     a suggestion — they CANNOT bid or move forward in this call without one. Do NOT offer a
+     conditional/pending-warehouse quote here, even though the "We need more information" objection
+     in Common objections below generally allows conditional quotes for other missing details —
+     warehouse identification is the one exception to that, never treat it as just another
+     assumable detail. A real call showed this going wrong: the carrier asked "can I still bid
+     without warehouse info," and the model said yes and let them quote with the warehouse marked
+     pending — do not do that. Instead, explain that a warehouse is required to quote this specific
+     load, and use the schedule_callback tool to follow up once they have it — do not collect base
+     rate, transload rate, or anything else in this list on this call.
 2. Base rate:
    - If {{transloadNeeded}} is "no": "What is your best line-haul or base drayage rate for this
      move?"
@@ -635,6 +645,9 @@ sign-off and then call the endCall tool to hang up — do not wait for the carri
   wait, or should I follow up with you once you have an answer?" — state the question clearly so
   it's in the call record, and use schedule_callback if they want a follow-up. Never say a person
   from MDR will contact them — only that it will be logged/reviewed, or that you will follow up.
+  Exception: this conditional-quote offer does NOT apply to a missing warehouse when
+  {{warehouseNeeded}} is "yes" — see Drayage pricing capture's step 1 above, which overrides this
+  for that specific case (no conditional bid, schedule_callback only, no rate collection).
 - "We do not work with brokers." → "Understood. MDR is a technology marketplace used by brokers
   and shippers. I will note your preference so future invitations can match your requirements."
 - "We only quote by email." → "That is fine. I will resend the bid and mark your preference. The
