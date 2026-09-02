@@ -30,7 +30,21 @@ import {
   submitCallFinalResult as mdrSubmitCallFinalResult,
   submitCallLog as mdrSubmitCallLog,
 } from "../mdr/api.js";
+import { ORCHESTRATION_WEBHOOK_URL } from "../assistant/tools.js";
 import type { HydratedDocument } from "mongoose";
+
+/**
+ * Builds the publicly-playable recording URL sent to MDR in the Call Log
+ * API's data.recording_url — see recordings.ts's header comment for why the
+ * raw CallAttempt.recordingUrl (a private R2 path) can't be used directly.
+ * Derives the base from ORCHESTRATION_WEBHOOK_URL (same public host Vapi
+ * already calls back into) rather than a separate env var.
+ */
+function buildPlayableRecordingUrl(vapiCallId: string): string {
+  const base = new URL(ORCHESTRATION_WEBHOOK_URL).origin;
+  const key = process.env.TEST_DISPATCH_API_KEY ?? "";
+  return `${base}/recordings/${vapiCallId}?key=${key}`;
+}
 
 /** "lane_not_serviced" -> "Lane not serviced" — MDR's reason fields are free text, not our fixed enum. */
 export function humanizeReason(reason: string): string {
@@ -462,7 +476,12 @@ export async function handleEndOfCallReport(message: any) {
             direction: "outbound",
             started_at: message.startedAt,
             ended_at: message.endedAt,
-            recording_url: attempt.recordingUrl,
+            // Not attempt.recordingUrl directly — that's a private R2 path
+            // Vapi itself requires an authenticated API call to play (see
+            // recordings.ts). This points at our own proxy instead, which
+            // is actually playable.
+            recording_url: attempt.recordingUrl ? buildPlayableRecordingUrl(vapiCallId) : undefined,
+            transcript: attempt.transcript,
             provider: "vapi",
             call_result: attempt.callResult,
             ended_reason: attempt.endedReason,
