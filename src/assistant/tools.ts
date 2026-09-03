@@ -49,8 +49,10 @@ const quoteFieldProperties = {
   base_rate: {
     type: "number",
     description:
-      "base drayage rate — pickup to warehouse if this load needs storage, otherwise pickup to " +
-      "final delivery",
+      "base drayage rate, PER CONTAINER — pickup to warehouse if this load needs storage, " +
+      "otherwise pickup to final delivery. If the carrier only gave a combined total for all " +
+      "containers, this must be that total divided by the container count, confirmed back to them " +
+      "— never the raw total itself.",
   },
   fsc: { type: "number", description: "fuel surcharge, as a percentage" },
   acc_types: {
@@ -63,12 +65,18 @@ const quoteFieldProperties = {
   transload_rate: {
     type: "number",
     description:
-      "only if this load needs transload. The TOTAL cost across all containers on this load, not " +
-      "a per-container rate — always ask the carrier for the total covering every container, not a " +
-      "per-unit figure.",
+      "only if this load needs transload. PER CONTAINER, not a combined total — if the carrier " +
+      "only gave a combined total for all containers, this must be that total divided by the " +
+      "container count, confirmed back to them.",
   },
-  finalmile_rate: { type: "number", description: "only if this load needs storage" },
-  finalmile_fsc: { type: "number", description: "only if this load needs storage" },
+  finalmile_rate: {
+    type: "number",
+    description:
+      "only if this load needs final mile. PER CONTAINER, not a combined total — if the carrier " +
+      "only gave a combined total for all containers, this must be that total divided by the " +
+      "container count, confirmed back to them.",
+  },
+  finalmile_fsc: { type: "number", description: "only if this load needs final mile" },
   // Vapi's schema validator rejects a numeric enum ([0, 1]) on a "number"
   // field — enum values must be strings. Sent as "0"/"1" and coerced back
   // to a real 0/1 server-side (see toBinaryFlag in webhookHandlers.ts).
