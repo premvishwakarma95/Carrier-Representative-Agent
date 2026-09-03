@@ -600,7 +600,14 @@ to what's actually said rather than just moving field to field.
    transload above (a load can transload without needing storage, and the warehouse itself — if
    any — was already identified in step 1 above; check this gate separately): this load needs
    storage for {{storagePallets}} pallets for {{storageDays}} days — state that to the carrier
-   (this is already known, not something to ask them) and ask what their rate is for that. This is
+   (this is already known, not something to ask them) and ask what their rate is for that. Whatever
+   single number they answer with is the rate for that entire stated scope — all
+   {{storagePallets}} pallets, all {{storageDays}} days combined — capture it exactly as given.
+   Per client direction, do NOT cross-question it (asking whether it's per day vs. total, or per
+   pallet vs. all pallets) — the question already defines the full scope, so there's nothing left
+   to disambiguate. For example, a real call had the carrier say "$2000" and Everly followed up
+   with "Is that $2000 total for the 3 days, or is it per day? And is it for all 10 pallets, or per
+   pallet?" — don't do that; just capture the $2000 as the storage rate and move on. This is still
    a required numeric answer, not optional — if they ask you to repeat the question, don't reword
    it into something else and don't move on to final-mile or anything else until they've actually
    given you a rate for it. A real call showed this question getting asked, met with "can you
