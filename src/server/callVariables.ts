@@ -100,6 +100,37 @@ function renderAdditionalServices(params: {
 }
 
 /**
+ * Short, upfront service-type statement — per client direction (2026-09-02),
+ * spoken in Permission and qualification BEFORE the phone-vs-email question,
+ * not just later in the full Concise load presentation summary. The carrier
+ * should know whether this is a simple Drayage Only move or a more involved
+ * one (transload/final-mile/storage) before deciding how they want to quote
+ * it. Deliberately pre-rendered as a complete statement (not left to the
+ * model to compose from the raw transloadNeeded/finalMileNeeded/
+ * storageNeeded booleans) — same reasoning as renderAdditionalServices
+ * above, which exists for exactly this class of real-call failure.
+ */
+function renderServiceTypeSummary(params: {
+  serviceScope: string;
+  transloadNeeded: string;
+  finalMileNeeded: string;
+  storageNeeded: string;
+  storageDays: string;
+  storagePallets: string;
+}): string {
+  const base = `This is a ${params.serviceScope} load.`;
+  if (params.transloadNeeded !== "yes") return base;
+
+  const parts = ["Transloading"];
+  if (params.finalMileNeeded === "yes") parts.push("Final Mile delivery");
+  let detail = `This load requires ${parts.join(", and ")}`;
+  if (params.storageNeeded === "yes") {
+    detail += `, with storage for ${params.storageDays} days, ${params.storagePallets} pallets`;
+  }
+  return `${base} ${detail}.`;
+}
+
+/**
  * Renders the carrier's existing warehouses (from a fresh "Get Specific
  * Carrier" response) as a spoken-context string. The prompt tells Everly to
  * match against "the known list already given in your context for this
@@ -242,6 +273,14 @@ export function buildCallVariables(
       storageDays,
       storagePallets,
       finalMileNeeded,
+    }),
+    serviceTypeSummary: renderServiceTypeSummary({
+      serviceScope: fallback(load.service_type),
+      transloadNeeded,
+      finalMileNeeded,
+      storageNeeded,
+      storageDays,
+      storagePallets,
     }),
     targetRate: formatNumber(load.target_rate),
     // Percentage, not a dollar figure — no thousands-separator formatting

@@ -353,8 +353,8 @@ with the person who handles drayage pricing or dispatch for {{carrierName}}?"
 ## Permission and qualification
 
 State: "The move is from {{pickupLocation}} to {{deliveryLocation}}. It requires a
-{{equipmentDescription}}. The current target rate is \${{targetRate}}. Are you currently handling
-this lane and equipment?"
+{{equipmentDescription}}. {{serviceTypeSummary}} The current target rate is \${{targetRate}}. Are
+you currently handling this lane and equipment?"
 
 - If yes: "Perfect." Proceed to Quoting method below.
 - If maybe: "What part would you need clarified before deciding whether you can quote it?" Answer
