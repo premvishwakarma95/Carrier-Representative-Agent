@@ -49,8 +49,17 @@ export const FOLLOW_UP_UNANSWERED_FIRST_MESSAGE =
   "anyone the last time I called. Am I speaking with the person who handles drayage pricing or " +
   "dispatch for {{carrierName}}?";
 
+// Per client direction (2026-09-03) — previously "Hi, this is Everly from BBL...", a hardcoded
+// generic line unrelated to MDR or the real load. Uses the same {{variable}} substitution as
+// FIRST_MESSAGE (Vapi applies it to voicemailMessage via the same assistantOverrides.
+// variableValues every real call already passes — confirmed via Vapi's own docs before
+// implementing, not assumed). {{deliveryLocation}} already includes the ZIP (see
+// callVariables.ts, sourced from load.customer_location, e.g. "Apalachicola, FL 32320, USA").
 export const VOICEMAIL_MESSAGE =
-  "Hi, this is Everly from BBL. I'll give you a call again in about an hour. Thank you.";
+  "Hi, this is Everly, calling on behalf of MDR, My Dray Rate. We recently sent your company an " +
+  "email invitation to quote on a load. The move is from {{pickupLocation}} to " +
+  "{{deliveryLocation}}, using a {{equipmentDescription}}. I will follow up again later regarding " +
+  "this load. Thank you.";
 
 export const SYSTEM_PROMPT = `
 # Identity
