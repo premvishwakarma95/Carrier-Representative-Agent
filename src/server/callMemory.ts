@@ -20,6 +20,7 @@
  */
 import { CallAttempt, Quote } from "../db/models/index.js";
 import { humanizeReason } from "./webhookHandlers.js";
+import { isValidTimezone } from "./callingWindow.js";
 
 const MEANINGFUL_STATUSES = new Set(["completed"]);
 const MEANINGFUL_RESULTS = new Set(["do_not_call"]);
@@ -123,8 +124,24 @@ async function describeMeaningfulAttempt(attempt: any, currentLoadId: string): P
   }
 
   if (attempt.callResult === "callback") {
+    // attempt.timezone is MDR's confirmed real carrier timezone, stored fresh
+    // at dial time (see dispatch.ts) — the same source of truth used
+    // everywhere else callback times are computed or spoken (schedule_callback,
+    // {{currentTime}}). Without a timeZone here, toLocaleString silently
+    // resolves to the server host's zone instead of the carrier's own — a
+    // real call (2026-09-04, outreach 366) showed this speaking "7:35 AM" for
+    // a callbackAt that was actually 1:05 PM in the carrier's real timezone
+    // (Asia/Kolkata), contradicting the correctly-computed {{currentTime}} in
+    // the very same call and confusing the carrier.
+    const hasValidTimezone = isValidTimezone(attempt.timezone);
     const time = attempt.callbackAt
-      ? ` around ${attempt.callbackAt.toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}${attempt.callbackTimeZone ? ` (${attempt.callbackTimeZone})` : ""}`
+      ? ` around ${attempt.callbackAt.toLocaleString("en-US", {
+          month: "long",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          ...(hasValidTimezone ? { timeZone: attempt.timezone } : {}),
+        })}${attempt.callbackTimeZone ? ` (${attempt.callbackTimeZone})` : ""}`
       : "";
     return `We spoke ${when} about ${about} and you asked us to call back${time}.`;
   }
