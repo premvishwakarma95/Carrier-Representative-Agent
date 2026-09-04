@@ -24,9 +24,26 @@ function fallback(value: unknown, label = "unknown"): string {
  * "this month" / "end of the year" to 2024 instead of 2026 for
  * driver_available/rate_valid_until, two full years off. Every relative
  * date question needs this as its anchor.
+ *
+ * Must be resolved in the carrier's own timezone, not the server's — a real
+ * call (2026-09-04) showed a carrier in America/Anchorage (UTC-8) ask for a
+ * callback "in 2 minutes" while it was still Sept 3rd in their own local
+ * time, but this returned the server's Sept 4th (a bare `new Date()` with no
+ * timeZone resolves to the server host's zone). The model combined that
+ * server-side date with the carrier-timezone-aware {{currentTime}} below,
+ * producing a wall-clock string one calendar day ahead of the carrier's
+ * actual local "today" — wallClockToUtc then correctly interpreted that
+ * wrong date against the carrier's real timezone, landing the callback a
+ * full day late. Keep this in the same timezone as currentTime/greeting
+ * below so the two anchors the model reasons from never disagree.
  */
-function formatCurrentDate(): string {
-  return new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+function formatCurrentDate(timezone?: string): string {
+  return new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    ...(timezone ? { timeZone: timezone } : {}),
+  });
 }
 
 /**
@@ -166,11 +183,12 @@ export function buildCallVariables(
   callMemory: string = "",
   isFinalAttempt: boolean = false
 ) {
-  const currentDate = formatCurrentDate();
-
   // dispatch.ts already validates carrier_timezone before ever placing this
   // call (see its isValidTimezone gate), so this fallback is defensive-only —
   // never expected to actually trigger on a real dial.
+  const currentDate = isValidTimezone(carrier.carrier_timezone)
+    ? formatCurrentDate(carrier.carrier_timezone)
+    : formatCurrentDate();
   const greeting = isValidTimezone(carrier.carrier_timezone) ? greetingForTimezone(carrier.carrier_timezone) : "Hello";
   const currentTime = isValidTimezone(carrier.carrier_timezone)
     ? formatCurrentTime(carrier.carrier_timezone)
