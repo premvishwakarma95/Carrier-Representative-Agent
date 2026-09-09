@@ -498,7 +498,6 @@ export async function handleEndOfCallReport(message: any) {
   // payload — no extra fetch needed (confirmed against Vapi's real
   // ServerMessageEndOfCallReport schema, 2026-09-09).
   attempt.vapiCost = message.cost;
-  attempt.vapiCostBreakdown = message.costs;
 
   // Twilio's cost is a best-effort, one-shot synchronous attempt — see
   // CallAttempt.ts's field comment: this is commonly still null at this

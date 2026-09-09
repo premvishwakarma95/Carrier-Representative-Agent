@@ -83,9 +83,9 @@ const callAttemptSchema = new Schema(
     callbackTimeZone: String,
 
     // Per-call cost, captured at end-of-call-report time (see
-    // webhookHandlers.ts). vapiCost/vapiCostBreakdown come straight off
-    // Vapi's own webhook payload — confirmed empirically (2026-09-09) to be
-    // available within seconds of a call ending, no reconciliation needed.
+    // webhookHandlers.ts). vapiCost comes straight off Vapi's own webhook
+    // payload — confirmed empirically (2026-09-09) to be available within
+    // seconds of a call ending, no reconciliation needed.
     // twilioCost is a best-effort synchronous fetch attempted at the same
     // time — Twilio's own price is NOT reliably instant (confirmed
     // empirically: most calls settle within minutes, but a real call was
@@ -93,7 +93,6 @@ const callAttemptSchema = new Schema(
     // never be treated as a failure — just "not yet available." No
     // retry/backfill job exists yet for the null case.
     vapiCost: Number,
-    vapiCostBreakdown: Schema.Types.Mixed,
     twilioCallSid: String,
     twilioCost: Number,
 
