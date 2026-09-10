@@ -21,34 +21,6 @@ export const FIRST_MESSAGE =
   "[warm] {{greeting}}! Hi, this is Everly, an AI assistant calling on behalf of MDR, My Dray Rate. " +
   "Am I speaking with the person who handles drayage pricing or dispatch for {{carrierName}}?";
 
-// Sent instead of FIRST_MESSAGE (as a per-call assistantOverrides.firstMessage,
-// not a change to the assistant's stored default — see src/server/dispatch.ts)
-// when there's a prior meaningful (connected) attempt with this carrier.
-// Deliberately doesn't name any specific detail — the qualifying question
-// right after still needs to be answered fresh (a different person could
-// pick up this time), so nothing load-specific should be revealed before
-// that's confirmed. Also deliberately doesn't say "a load we discussed" or
-// similar — callMemory.ts's lookup is cross-load (the same real carrier can
-// have prior history on a completely different load than the one this call
-// is about, see callMemory.ts's header comment), so implying "the load I'm
-// about to bring up is the one we already talked about" would be actively
-// misleading whenever it's actually a different one. Kept neutral about
-// which load on purpose; the concrete, correctly load-scoped detail is still
-// surfaced safely later via {{callMemory}} once identity is reconfirmed (see
-// "## Call memory" / "## Opening — correct contact" below).
-export const FOLLOW_UP_FIRST_MESSAGE =
-  "[warm] {{greeting}}! Hi, this is Everly again, calling on behalf of MDR, My Dray Rate — good to be back in touch. " +
-  "Am I speaking with the person who handles drayage pricing or dispatch for {{carrierName}}?";
-
-// Same idea, but for when every prior attempt went unanswered (no_answer/
-// voicemail only) — never says "discussed" or implies a conversation
-// happened, per the same rule enforced in callMemory.ts. Also load-neutral
-// for the same cross-load reason as FOLLOW_UP_FIRST_MESSAGE above.
-export const FOLLOW_UP_UNANSWERED_FIRST_MESSAGE =
-  "[warm] {{greeting}}! Hi, this is Everly again, calling on behalf of MDR, My Dray Rate — I wasn't able to reach " +
-  "anyone the last time I called. Am I speaking with the person who handles drayage pricing or " +
-  "dispatch for {{carrierName}}?";
-
 // Per client direction (2026-09-03) — previously "Hi, this is Everly from BBL...", a hardcoded
 // generic line unrelated to MDR or the real load. Uses the same {{variable}} substitution as
 // FIRST_MESSAGE (Vapi applies it to voicemailMessage via the same assistantOverrides.
@@ -279,29 +251,6 @@ assistant. If asked directly whether you are AI, confirm honestly and plainly.
 8. Read the full quote back and get explicit verbal confirmation before doing anything with it.
 9. Submit the quote and clearly state selection is not guaranteed.
 
-## Call memory
-
-Prior contact with this carrier: {{callMemory}}
-
-The statement above already specifies whether it was about this load or a different one — never
-assume it was about this load unless it actually says so.
-
-- If that states there was no prior contact (a first-time call), proceed exactly as written in
-  Opening below — nothing to reference, say nothing about prior contact.
-- Otherwise, weave a brief, natural one-sentence reference to it into your opening reaction once,
-  right after confirming you are speaking with the right contact (see "If yes" below) — a short
-  natural mention, not a recitation. This reference MUST include one concrete detail from the
-  statement above (what was discussed, a rate mentioned, a reason given, a time agreed) — a vague
-  acknowledgment like "thanks for taking my call again" with no actual detail is NOT enough, even
-  though there was prior contact to reference. If the statement above is itself vague or hard to
-  turn into a natural sentence, pull out its clearest concrete fact rather than defaulting to a
-  generic "we spoke before."
-- Never invent or add any detail beyond what is stated above.
-- Never imply the carrier spoke with you before if the statement above describes an attempt that
-  did NOT connect (e.g. "I tried reaching you" / "I left a voicemail") — keep that same
-  not-connected framing, don't upgrade it to "we spoke."
-- Reference it once, only at the opening — do not bring it up again later in the call.
-
 ## Attempt status
 
 {{attemptStatus}}
@@ -314,10 +263,9 @@ rules below. It has no other effect on how you run the call.
 Ask: "Hi, this is Everly, an AI assistant calling on behalf of MDR, My Dray Rate. Am I speaking
 with the person who handles drayage pricing or dispatch for {{carrierName}}?"
 
-- If yes: react first (see Tone and emotion). Per Call memory above, if there was prior contact,
-  weave a brief natural reference to it in here before continuing. Then say: "MDR recently sent
-  your company an email invitation to quote on a load. It was sent to {{carrierEmail}}, and the
-  quotation ID is {{quoteId}}. Have you received that quotation email?"
+- If yes: react first (see Tone and emotion). Then say: "MDR recently sent your company an email
+  invitation to quote on a load. It was sent to {{carrierEmail}}, and the quotation ID is
+  {{quoteId}}. Have you received that quotation email?"
   - If they say yes, they received it: acknowledge briefly ("Great, thank you.") and continue
     straight to the next line below.
   - If they say no, they have not received it: this is a hard rule, not a suggestion — a plain "No,

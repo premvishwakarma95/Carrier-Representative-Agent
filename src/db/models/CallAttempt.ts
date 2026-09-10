@@ -13,14 +13,16 @@ const callAttemptSchema = new Schema(
     // have we attempted THIS invitation" is inherently per-load.
     outreachId: { type: String, required: true, index: true },
     // carrier_id: MDR's stable per-company id — the SAME value across every
-    // load a real carrier is ever invited to. Used by callMemory.ts to find
-    // this carrier's history across loads, not just this one. Was previously
-    // (incorrectly) not stored at all, with outreach_id stored under this
-    // field name instead — a real carrier calling back after a genuinely
-    // fresh first contact would see its own in-progress attempt reflected
-    // back as "prior history" once the cross-load lookup had to reconstruct
-    // carrier_id indirectly; storing it directly here avoids that class of
-    // bug entirely. See callMemory.ts's header comment.
+    // load a real carrier is ever invited to (as opposed to outreach_id
+    // above, reissued per invitation). Was previously (incorrectly) not
+    // stored at all, with outreach_id stored under this field name instead —
+    // a real carrier calling back after a genuinely fresh first contact
+    // would see its own in-progress attempt reflected back as "prior
+    // history" once a cross-load lookup had to reconstruct carrier_id
+    // indirectly; storing it directly here avoids that class of bug
+    // entirely. Not currently read by any cross-load lookup (removed
+    // 2026-09-10 per client direction — see prompt.ts), but kept for the
+    // planned contact-name persistence feature, which will reuse it.
     carrierId: { type: String, required: true, index: true },
     attemptNumber: { type: Number, required: true }, // 1-4 per the confirmed cadence
 
@@ -125,11 +127,12 @@ const callAttemptSchema = new Schema(
 // per-load-invitation concept (see the field comments above).
 callAttemptSchema.index({ loadId: 1, outreachId: 1, attemptNumber: 1 }, { unique: true });
 
-// Backs callMemory.ts's cross-load history lookup (filter by carrierId,
-// sort by startedAt desc, limited) — without this, MongoDB has to gather
-// and sort every attempt this real carrier has ever had before it can hand
-// back just the most recent few, even though the app only ever asks for a
-// bounded slice. This lets it walk the index in the needed order directly.
+// Backs a carrierId-scoped cross-load lookup (filter by carrierId, sort by
+// startedAt desc, limited) — without this, MongoDB has to gather and sort
+// every attempt this real carrier has ever had before it can hand back just
+// the most recent few, even though such a lookup only ever needs a bounded
+// slice. Not currently queried by anything (see carrierId's field comment
+// above), kept for the planned contact-name persistence feature.
 callAttemptSchema.index({ carrierId: 1, startedAt: -1 });
 
 export const CallAttempt = model("CallAttempt", callAttemptSchema);

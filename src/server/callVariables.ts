@@ -180,7 +180,6 @@ function renderKnownAccessorials(items: Array<{ id: number; name: string; price:
 export function buildCallVariables(
   load: any,
   carrier: MdrCarrierDetail,
-  callMemory: string = "",
   isFinalAttempt: boolean = false
 ) {
   // dispatch.ts already validates carrier_timezone before ever placing this
@@ -194,11 +193,11 @@ export function buildCallVariables(
     ? formatCurrentTime(carrier.carrier_timezone)
     : "unknown";
 
-  // Rendered as a complete statement, same reasoning as callMemory above —
-  // Vapi substitutes {{attemptStatus}} as literal text, so a bare boolean
-  // would leave the model to guess at phrasing. See prompt.ts's "Attempt
-  // status" section and the schedule_callback final-attempt rule that reads
-  // it — computed by dispatch.ts from nextAttemptNumber === MAX_CALL_ATTEMPTS.
+  // Rendered as a complete statement — Vapi substitutes {{attemptStatus}} as
+  // literal text, so a bare boolean would leave the model to guess at
+  // phrasing. See prompt.ts's "Attempt status" section and the
+  // schedule_callback final-attempt rule that reads it — computed by
+  // dispatch.ts from nextAttemptNumber === MAX_CALL_ATTEMPTS.
   const attemptStatus = isFinalAttempt
     ? "This is the final allowed call to this carrier for this load — no further automated attempts will happen after this one."
     : "This is not the final allowed attempt — further automated attempts remain if needed.";
@@ -243,14 +242,6 @@ export function buildCallVariables(
     currentTime,
     greeting,
 
-    // Populated by src/server/callMemory.ts, computed by dispatch.ts before
-    // calling this function (requires an async DB lookup this function
-    // deliberately doesn't do itself — see callMemory.ts's header comment).
-    // Vapi substitutes {{callMemory}} as literal text before the model ever
-    // sees the prompt — an empty string there would leave a dangling
-    // fragment mid-sentence, not a value the model can branch on. Always
-    // render a complete, unambiguous statement instead.
-    callMemory: callMemory || "No prior contact — this is the first call to this carrier for this load.",
     attemptStatus,
 
     carrierName: fallback(carrier.company_name),
