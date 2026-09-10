@@ -30,9 +30,34 @@
  */
 import { Router } from "express";
 import { Carrier, Load, WebhookResponse } from "../db/models/index.js";
-import { getAllCarriers } from "../mdr/api.js";
+import { getAllCarriers, type MdrCarrier } from "../mdr/api.js";
 
 export const mdrWebhookRouter = Router();
+
+/**
+ * Bulk-upserts carriers for a load into the local Carrier collection — the
+ * same logic the webhook capture below uses for a load's full carrier list,
+ * also reused by webhookHandlers.ts to store a replacement carrier pulled
+ * in after a decline (see getAllCarriers' availableCount option).
+ */
+export async function upsertCarriers(loadId: number, carriers: MdrCarrier[]): Promise<void> {
+  if (carriers.length === 0) return;
+  // Bulk upsert, not one findOneAndUpdate per carrier: a load can have 100+
+  // invited carriers, and firing that many concurrent round-trips at once
+  // doesn't scale (and can exhaust the connection pool). bulkWrite sends
+  // every carrier's upsert as a single command instead. Carrier.ts's schema
+  // has no `default:` fields, so dropping setDefaultsOnInsert (not
+  // available on bulkWrite) is a no-op change, not a behavior change.
+  await Carrier.bulkWrite(
+    carriers.map((carrier) => ({
+      updateOne: {
+        filter: { outreach_id: carrier.outreach_id },
+        update: { $set: { ...carrier, load_id: loadId } },
+        upsert: true,
+      },
+    }))
+  );
+}
 
 mdrWebhookRouter.post("/capture", async (req, res) => {
   const expectedKey = process.env.TEST_DISPATCH_API_KEY;
@@ -71,23 +96,7 @@ mdrWebhookRouter.post("/capture", async (req, res) => {
 
   try {
     const { carriers } = await getAllCarriers(load.id);
-    // Bulk upsert, not one findOneAndUpdate per carrier: a load can have
-    // 100+ invited carriers, and firing that many concurrent round-trips at
-    // once doesn't scale (and can exhaust the connection pool). bulkWrite
-    // sends every carrier's upsert as a single command instead. Carrier.ts's
-    // schema has no `default:` fields, so dropping setDefaultsOnInsert (not
-    // available on bulkWrite) is a no-op change, not a behavior change.
-    if (carriers.length > 0) {
-      await Carrier.bulkWrite(
-        carriers.map((carrier) => ({
-          updateOne: {
-            filter: { outreach_id: carrier.outreach_id },
-            update: { $set: { ...carrier, load_id: load.id } },
-            upsert: true,
-          },
-        }))
-      );
-    }
+    await upsertCarriers(load.id, carriers);
     console.log(`webhook capture: upserted ${carriers.length} carrier(s) for load ${load.id}`);
   } catch (err) {
     console.error(`webhook capture: failed to fetch/upsert carriers for load ${load.id}:`, err);

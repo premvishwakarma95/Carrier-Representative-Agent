@@ -29,7 +29,9 @@ import {
   submitCallResult as mdrSubmitCallResult,
   submitCallFinalResult as mdrSubmitCallFinalResult,
   submitCallLog as mdrSubmitCallLog,
+  getAllCarriers,
 } from "../mdr/api.js";
+import { upsertCarriers } from "./mdrWebhook.js";
 import { ORCHESTRATION_WEBHOOK_URL } from "../assistant/tools.js";
 import { getCallPrice } from "../twilio/calls.js";
 import type { HydratedDocument } from "mongoose";
@@ -51,6 +53,25 @@ function buildPlayableRecordingUrl(vapiCallId: string): string {
 export function humanizeReason(reason: string): string {
   const text = reason.replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * After a carrier declines a load or opts out entirely, pull a fresh
+ * replacement carrier for this same load from MDR (same "Get All Carriers"
+ * endpoint as getAllCarriers, with the available_count param — see
+ * mdr/api.ts) and store it locally, so the load's carrier pool gets topped
+ * up rather than only ever shrinking. Best-effort — logged on failure, never
+ * thrown back to the caller: by the time this runs, the decline/opt-out
+ * itself already succeeded on MDR's side, which matters more than this.
+ */
+export async function pullReplacementCarrier(loadId: string, label: string): Promise<void> {
+  try {
+    const { carriers } = await getAllCarriers(Number(loadId), { availableCount: 1 });
+    await upsertCarriers(Number(loadId), carriers);
+    console.log(`${label}: pulled/stored ${carriers.length} replacement carrier(s) for load ${loadId}`);
+  } catch (err) {
+    console.error(`${label}: failed to pull/store replacement carrier for load ${loadId}:`, err);
+  }
 }
 
 type ToolCall = { id: string; name: string; parameters: Record<string, any> };
@@ -296,6 +317,7 @@ async function logDecline(params: any, { attempt }: CallContext) {
   let mdrSync: "ok" | "failed" = "ok";
   try {
     await mdrDeclineCarrier(Number(attempt.outreachId), reasonText);
+    await pullReplacementCarrier(attempt.loadId, "log_decline");
   } catch (err) {
     console.error(`log_decline: MDR decline write-back failed for carrier ${attempt.outreachId}:`, err);
     mdrSync = "failed";
@@ -369,6 +391,7 @@ async function recordDoNotCall(_params: any, { attempt }: CallContext) {
   let mdrSync: "ok" | "failed" = "ok";
   try {
     await mdrStopCarrier(Number(attempt.outreachId), reasonText);
+    await pullReplacementCarrier(attempt.loadId, "record_do_not_call");
   } catch (err) {
     console.error(`record_do_not_call: MDR stop write-back failed for carrier ${attempt.outreachId}:`, err);
     mdrSync = "failed";

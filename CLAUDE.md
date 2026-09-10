@@ -40,7 +40,7 @@ Six directories under `src/`, talking to each other only through the MDR API, th
 1. **`src/assistant/`** — defines Everly herself. `prompt.ts` is the entire conversational script (playbook-derived, heavily hand-tuned through many live-call iterations — treat edits here as high-risk, keep them additive) with `{{variable}}` placeholders. `tools.ts` defines 8 custom function-calling tools (see below) plus Vapi's native `endCall`. `create.ts` pushes both to Vapi via `POST`/`PATCH /assistant`.
 
 2. **`src/mdr/`** — the real MDR API client. `client.ts` is a thin fetch wrapper (`Authorization: Bearer MDR_API_KEY`) against `MDR_API_BASE_URL`. `api.ts` implements MDR's confirmed staging endpoints — writes keyed on `outreach_id`, the two lookups keyed on `carrier_id`/`load_id`:
-   - `getAllCarriers(loadId)` / `getAllCarriersBatch(loadId, batch)` — `GET /voice/load/{loadId}`, paginated (batch size 25)
+   - `getAllCarriers(loadId)` — `GET /voice/load/{loadId}`, returns every carrier for the load in one response (no more `?batch=` pagination as of 2026-09-10 — MDR removed it; `getAllCarriersBatch` no longer exists)
    - `getSpecificCarrier(loadId, carrierId)` — `GET /voice/load/{loadId}/carrier/{carrierId}`
    - `declineCarrier(outreachId, reason)` — `POST /voice/decline`
    - `stopCarrier(outreachId, reason)` — `POST /voice/stop`

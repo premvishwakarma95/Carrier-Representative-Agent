@@ -1,7 +1,7 @@
 /**
  * Local Carrier record, extracted from MDR's real "Get All Carriers"
- * endpoint (GET /voice/load/{load_id}?batch=1 — see src/mdr/api.ts). Field
- * names mirror MDR's response exactly, no renaming.
+ * endpoint (GET /voice/load/{load_id} — see src/mdr/api.ts). Field names
+ * mirror MDR's response exactly, no renaming.
  *
  * `outreach_id` is the unique lookup key — it's what every MDR write
  * endpoint (call-result, decline, stop, email-resend, etc.) is keyed on, not

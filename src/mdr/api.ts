@@ -51,45 +51,18 @@ export interface MdrGetAllCarriersResponse {
 }
 
 /**
- * Fetches one batch of carriers for a load. Paginated — batch_size is 25
- * per the real response, undocumented in either PDF. Callers needing the
- * full list should keep incrementing `batch` until they've collected
- * response_summary.total_carriers carriers.
+ * Fetches every carrier for a load. Previously paginated (25 per page via a
+ * ?batch= param, looped until response_summary.total_carriers was met) —
+ * per MDR (2026-09-10), this endpoint no longer takes/needs that param and
+ * returns the full carrier list for the load in one response.
+ *
+ * availableCount is the same endpoint with one added param (MDR, 2026-09-10)
+ * — pass it to pull fresh replacement carrier(s) not yet invited on this
+ * load, e.g. after one declines. Same response shape either way.
  */
-export function getAllCarriersBatch(loadId: number, batch = 1): Promise<MdrGetAllCarriersResponse> {
-  return mdr.get<MdrGetAllCarriersResponse>(`/voice/load/${loadId}?batch=${batch}`);
-}
-
-const MAX_CARRIER_BATCHES = 200; // 200 * batch_size(25) = 5000 carriers — far above any real load, just a runaway-loop backstop
-
-/** Fetches every carrier for a load, looping through all batches. */
-export async function getAllCarriers(loadId: number): Promise<MdrGetAllCarriersResponse> {
-  const first = await getAllCarriersBatch(loadId, 1);
-  const carriers = [...first.carriers];
-
-  // total_carriers has been unreliable enough elsewhere in this API (string
-  // vs number type mismatches on other fields) that a missing/non-numeric
-  // value here shouldn't be trusted to drive a loop condition — treat it as
-  // "just this first batch" instead of looping on NaN comparisons forever.
-  const totalCarriers = Number(first.response_summary?.total_carriers);
-  if (!Number.isFinite(totalCarriers)) {
-    console.warn(`getAllCarriers: missing/invalid total_carriers for load ${loadId}, returning first batch only`);
-    return first;
-  }
-
-  let batch = 1;
-  while (carriers.length < totalCarriers && first.carriers.length > 0) {
-    if (batch >= MAX_CARRIER_BATCHES) {
-      console.error(`getAllCarriers: hit ${MAX_CARRIER_BATCHES}-batch safety cap for load ${loadId} — returning ${carriers.length}/${totalCarriers} carriers`);
-      break;
-    }
-    batch += 1;
-    const next = await getAllCarriersBatch(loadId, batch);
-    if (next.carriers.length === 0) break;
-    carriers.push(...next.carriers);
-  }
-
-  return { ...first, carriers };
+export function getAllCarriers(loadId: number, options?: { availableCount?: number }): Promise<MdrGetAllCarriersResponse> {
+  const query = options?.availableCount ? `?available_count=${options.availableCount}` : "";
+  return mdr.get<MdrGetAllCarriersResponse>(`/voice/load/${loadId}${query}`);
 }
 
 export interface MdrAccessorial {
