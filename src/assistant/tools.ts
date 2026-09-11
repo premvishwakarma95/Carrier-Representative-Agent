@@ -193,7 +193,11 @@ export const TOOLS = [
           name: { type: "string", description: "the confirmed contact's first name (or full name if given)" },
           phone: {
             type: "string",
-            description: "the contact's phone number or extension, only if they actually stated one on this call — omit otherwise, never invent one",
+            description:
+              "the contact's phone number or extension, only if they actually stated one on this call — omit " +
+              "otherwise, never invent one. Capture exactly the digits they said, in the order they said them — " +
+              "never add a country code (e.g. +1, +91) unless they actually spoke it themselves; do not guess or " +
+              "normalize one on your own, even if it seems like the obvious default.",
           },
         },
         required: ["name"],

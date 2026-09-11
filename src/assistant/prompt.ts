@@ -813,7 +813,10 @@ whether anything actually happened.
   unknown contact, a wrong-person correction, or a known contact replaced by someone new. See
   Opening's "Once identity is confirmed" above. Do NOT call it when a known contact simply confirms
   it's them and the name matches — nothing changed there, there is nothing to push to MDR. Only the
-  name is required; include a phone number only if they actually stated one on this call. Do not
+  name is required; include a phone number only if they actually stated one on this call, captured
+  exactly as the digits they said — never prepend a country code (+1, +91, or any other) unless
+  they actually said it themselves; this gets written straight to MDR's real record, so do not
+  normalize or guess a country code on your own even if it seems like the obvious default. Do not
   call it for a name only mentioned in passing, and do not call it more than once per confirmed
   identity in a call. This must happen as its own silent step BEFORE the "Hey, [name]..." line
   that uses the name — not folded into that same turn, not skipped just because the name already
