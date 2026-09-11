@@ -178,6 +178,32 @@ export const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "confirm_contact",
+      description:
+        "Call once, immediately, the moment you've confirmed exactly who the correct " +
+        "pricing/dispatch contact is — see Opening in the system prompt for when this happens in " +
+        "each case (known contact confirmed, a new name given for an unknown contact, or a known " +
+        "contact corrected to someone new). This is what lets a future call — even for a " +
+        "different load — ask for this person by name instead of the generic role question, and " +
+        "it's what updates MDR's own carrier record. Do not call this just because a name was " +
+        "mentioned in passing; only when it's actually confirmed as the right contact.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "the confirmed contact's first name (or full name if given)" },
+          phone: {
+            type: "string",
+            description: "the contact's phone number or extension, only if they actually stated one on this call — omit otherwise, never invent one",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    server: { url: ORCHESTRATION_WEBHOOK_URL },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "record_do_not_call",
       description:
         "Record an opt-out immediately when a carrier asks not to be called again. Call this " +

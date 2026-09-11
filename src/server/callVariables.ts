@@ -180,7 +180,8 @@ function renderKnownAccessorials(items: Array<{ id: number; name: string; price:
 export function buildCallVariables(
   load: any,
   carrier: MdrCarrierDetail,
-  isFinalAttempt: boolean = false
+  isFinalAttempt: boolean = false,
+  knownContactName?: string
 ) {
   // dispatch.ts already validates carrier_timezone before ever placing this
   // call (see its isValidTimezone gate), so this fallback is defensive-only —
@@ -242,6 +243,23 @@ export function buildCallVariables(
     currentTime,
     greeting,
 
+    // Populated by contactMemory.ts, computed by dispatch.ts before calling
+    // this function. Empty string (not "unknown") when there's no known
+    // contact — the Opening section in prompt.ts branches on whether this
+    // is empty, and a real name should never be substituted with the word
+    // "unknown" if this ever ends up spoken by mistake.
+    knownContactName: knownContactName ?? "",
+    // MDR's own on-file contact name for this carrier (carrier.contact_name)
+    // — separate from knownContactName above, which only ever comes from a
+    // name WE confirmed by actually talking to someone (see
+    // contactMemory.ts). This MDR field may be a placeholder/company-level
+    // value, may be stale, and per client spec does not by itself make a
+    // contact "known" (that still requires knownContactName — carrier name
+    // exists AND we've called before). Exposed only as a secondary
+    // reference signal for the Opening section below to weigh when judging
+    // whether a heard name sounds right, never as a substitute for actually
+    // asking and confirming on a first-ever call.
+    mdrContactName: fallback(carrier.contact_name, ""),
     attemptStatus,
 
     carrierName: fallback(carrier.company_name),

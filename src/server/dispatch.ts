@@ -35,8 +35,9 @@ import { getSpecificCarrier } from "../mdr/api.js";
 import { computeAttemptSchedule, MAX_CALL_ATTEMPTS } from "./cadence.js";
 import { isWithinCallingWindow, isValidTimezone } from "./callingWindow.js";
 import { buildCallVariables } from "./callVariables.js";
+import { getKnownContact } from "./contactMemory.js";
 import { createOutboundCall } from "../vapi/calls.js";
-import { FIRST_MESSAGE } from "../assistant/prompt.js";
+import { FIRST_MESSAGE, KNOWN_CONTACT_FIRST_MESSAGE } from "../assistant/prompt.js";
 import { env } from "../config/env.js";
 
 export const dispatchRouter = Router();
@@ -398,13 +399,25 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   }
 
   try {
-    const variableValues = buildCallVariables(load, fresh.carrier, nextAttemptNumber === MAX_CALL_ATTEMPTS);
+    // Cross-load: keyed on MDR's stable carrier_id, not outreach_id (which
+    // is per-load-invitation) — see contactMemory.ts's header comment.
+    // attempt._id is excluded so the attempt just created above (in_progress,
+    // no confirmedContactName yet) never gets read back as its own "known
+    // contact" on a genuinely first-ever call to this carrier.
+    const knownContact = await getKnownContact(fresh.carrier.carrier_id, attempt._id);
+    const variableValues = buildCallVariables(
+      load,
+      fresh.carrier,
+      nextAttemptNumber === MAX_CALL_ATTEMPTS,
+      knownContact?.name
+    );
     const call = await createOutboundCall({
       assistantId: process.env.EVERLY_ASSISTANT_ID as string,
       phoneNumberId: env.vapiPhoneNumberId,
       customerNumber: phone,
       variableValues,
-      firstMessage: FIRST_MESSAGE,
+      firstMessage: knownContact ? KNOWN_CONTACT_FIRST_MESSAGE : FIRST_MESSAGE,
+      knownContactName: knownContact?.name,
     });
 
     attempt.vapiCallId = call.id;

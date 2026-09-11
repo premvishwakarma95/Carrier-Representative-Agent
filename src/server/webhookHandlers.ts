@@ -30,6 +30,7 @@ import {
   submitCallFinalResult as mdrSubmitCallFinalResult,
   submitCallLog as mdrSubmitCallLog,
   getAllCarriers,
+  updateCarrierDetail as mdrUpdateCarrierDetail,
 } from "../mdr/api.js";
 import { upsertCarriers } from "./mdrWebhook.js";
 import { ORCHESTRATION_WEBHOOK_URL } from "../assistant/tools.js";
@@ -111,6 +112,8 @@ export async function handleToolCalls(toolCallList: ToolCall[], vapiCallId: stri
 
 async function dispatchTool(name: string, params: Record<string, any>, context: CallContext) {
   switch (name) {
+    case "confirm_contact":
+      return confirmContact(params, context);
     case "calculate_quote":
       return calculateQuote(params, context);
     case "submit_quote":
@@ -207,6 +210,42 @@ function buildLocalQuoteFields(fields: ParsedQuoteFields) {
     driverAvailable: fields.driver_available,
     details: fields.details,
   };
+}
+
+async function confirmContact(params: any, { attempt }: CallContext) {
+  // Local write first — durable regardless of MDR's API being reachable,
+  // same pattern as every other tool here (e.g. log_decline). This is also
+  // what contactMemory.ts's cross-load lookup actually reads from, since
+  // MDR's own copy doesn't come back through getSpecificCarrier (see
+  // CallAttempt.ts's field comment) — so this save is the real record, not
+  // just an audit trail.
+  attempt.confirmedContactName = params.name;
+  if (params.phone) attempt.confirmedContactPhone = params.phone;
+  await attempt.save();
+
+  let mdrSync: "ok" | "failed" = "ok";
+  try {
+    await mdrUpdateCarrierDetail(Number(attempt.outreachId), params.name, params.phone ?? "");
+  } catch (err) {
+    console.error(`confirm_contact: MDR update-carrier-detail write-back failed for outreach ${attempt.outreachId}:`, err);
+    mdrSync = "failed";
+  }
+
+  // Keep our own local Carrier mirror in sync too — it's a separate record
+  // from CallAttempt.confirmedContactName above (that one backs the
+  // cross-load "known contact" lookup; this one is the plain per-outreach
+  // mirror of MDR's carrier fields, upserted from getAllCarriers/
+  // getSpecificCarrier elsewhere). Best-effort, same as log_decline's local
+  // Carrier.stop_call update — doesn't affect this tool's own success.
+  try {
+    const carrierUpdate: Record<string, string> = { contact_name: params.name };
+    if (params.phone) carrierUpdate.phone = params.phone;
+    await Carrier.updateOne({ outreach_id: Number(attempt.outreachId) }, carrierUpdate);
+  } catch (err) {
+    console.error(`confirm_contact: failed to update local Carrier.contact_name for outreach ${attempt.outreachId}:`, err);
+  }
+
+  return { ok: true, mdrSync };
 }
 
 async function calculateQuote(params: any, { attempt }: CallContext) {

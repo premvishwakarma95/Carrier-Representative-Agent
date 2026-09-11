@@ -20,9 +20,8 @@ const callAttemptSchema = new Schema(
     // would see its own in-progress attempt reflected back as "prior
     // history" once a cross-load lookup had to reconstruct carrier_id
     // indirectly; storing it directly here avoids that class of bug
-    // entirely. Not currently read by any cross-load lookup (removed
-    // 2026-09-10 per client direction — see prompt.ts), but kept for the
-    // planned contact-name persistence feature, which will reuse it.
+    // entirely. Used by contactMemory.ts's cross-load "known contact"
+    // lookup (see confirmedContactName below).
     carrierId: { type: String, required: true, index: true },
     attemptNumber: { type: Number, required: true }, // 1-4 per the confirmed cadence
 
@@ -84,6 +83,20 @@ const callAttemptSchema = new Schema(
     callbackAt: Date,
     callbackTimeZone: String,
 
+    // Set by the confirm_contact tool webhook, the moment Everly confirms
+    // she's speaking with the correct pricing/dispatch contact (see
+    // prompt.ts's "Opening — correct contact"). Read back cross-load by
+    // contactMemory.ts's carrierId-scoped lookup so a future call — even
+    // for a different load — can ask for this person directly instead of
+    // the generic role-based question. Also pushed to MDR's own
+    // update-carrier-detail endpoint, but that write does NOT come back
+    // through getSpecificCarrier/getAllCarriers (confirmed empirically,
+    // 2026-09-11 — contact_name there stayed unchanged after a real,
+    // successful update-carrier-detail call), so this local copy is the
+    // only place "known contact" is actually read from, not MDR's own data.
+    confirmedContactName: String,
+    confirmedContactPhone: String,
+
     // Per-call cost, captured at end-of-call-report time (see
     // webhookHandlers.ts). vapiCost comes straight off Vapi's own webhook
     // payload — confirmed empirically (2026-09-09) to be available within
@@ -127,12 +140,10 @@ const callAttemptSchema = new Schema(
 // per-load-invitation concept (see the field comments above).
 callAttemptSchema.index({ loadId: 1, outreachId: 1, attemptNumber: 1 }, { unique: true });
 
-// Backs a carrierId-scoped cross-load lookup (filter by carrierId, sort by
-// startedAt desc, limited) — without this, MongoDB has to gather and sort
-// every attempt this real carrier has ever had before it can hand back just
-// the most recent few, even though such a lookup only ever needs a bounded
-// slice. Not currently queried by anything (see carrierId's field comment
-// above), kept for the planned contact-name persistence feature.
+// Backs contactMemory.ts's cross-load "known contact" lookup (filter by
+// carrierId, sort by startedAt desc, limited) — without this, MongoDB has
+// to gather and sort every attempt this real carrier has ever had before
+// it can hand back just the most recent confirmed contact.
 callAttemptSchema.index({ carrierId: 1, startedAt: -1 });
 
 export const CallAttempt = model("CallAttempt", callAttemptSchema);

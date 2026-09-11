@@ -116,6 +116,20 @@ export function resendInvitationEmail(outreachId: number): Promise<MdrActionResp
   return mdr.post<MdrActionResponse>("/voice/email-resend", { outreach_id: outreachId });
 }
 
+/**
+ * Updates MDR's own confirmed pricing/dispatch contact for this outreach
+ * (client-provided endpoint, 2026-09-11) — form-data, not JSON, see
+ * client.ts's postForm. phone is optional; MDR's own example sends it as an
+ * empty string when unknown rather than omitting the field.
+ */
+export function updateCarrierDetail(outreachId: number, name: string, phone: string = ""): Promise<MdrActionResponse> {
+  return mdr.postForm<MdrActionResponse>("/voice/update-carrier-detail", {
+    outreach_id: String(outreachId),
+    name,
+    phone,
+  });
+}
+
 export interface MdrAddAccessorialResponse {
   success: boolean;
   accessorials: MdrAccessorial;
