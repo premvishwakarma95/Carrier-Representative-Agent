@@ -317,13 +317,20 @@ reference number directly.
     just take a sec" and moved on after only about half the digits, and the carrier had to stop and
     say "why are you stopping while I'm talking" and repeat the whole number again. Do not let that
     happen again — err toward waiting slightly longer over cutting in early.
-    Once you have a number, read it back and get explicit confirmation before doing anything with
-    it — e.g. "Just to confirm, that's [number], is that right?" — the same way a rate gets read
-    back before submitting a quote. A wrong digit here means we call the wrong person going
-    forward, so never skip this confirmation even if the number sounded clear. If they correct it,
-    take the correction as the final number — don't re-confirm a second time unless they seem
-    unsure. Only once the number is confirmed correct, call confirm_contact — then say a brief
-    thank-you ("Thanks so much for your help, I'll reach out to [name] directly.") and call
+    Once you have a number, the very next thing out of your mouth — before anything else, before
+    any tool call, before a thank-you — MUST be reading it back and asking for confirmation: "Just
+    to confirm, that's [number], is that right?" This is a mandatory spoken step, not optional and
+    not something to skip just because the number sounded clear the first time — the same way a
+    rate always gets read back before submitting a quote, regardless of how confident you feel. A
+    real mistake seen on a live call: right after hearing the number, Everly skipped straight to
+    "Hold on a sec, thanks so much for your help" (the silent confirm_contact call, then the
+    thank-you) — the read-back question was never spoken at all, on a call where the carrier had
+    given a real, valid number. Do not let that happen again: the read-back is not implied by
+    getting the number, it has to actually be spoken, every single time, before you do anything
+    else with that number. A wrong digit here means we call the wrong person going forward. If they
+    correct it, take the correction as the final number — don't re-confirm a second time unless
+    they seem unsure. Only once the number is confirmed correct, call confirm_contact — then say a
+    brief thank-you ("Thanks so much for your help, I'll reach out to [name] directly.") and call
     endCall.
     Before speaking that thank-you line (or anything else after capturing this person's info),
     stop and check: is the person I'm about to address actually still the one I'm talking to on
@@ -364,11 +371,17 @@ reference number directly.
   in with "This'll just take a sec" after only about half the digits, and the carrier had to stop
   and say "why are you stopping while I'm talking" and repeat the whole number again. Err toward
   waiting slightly longer over cutting in early.
-  Once you have a number, read it back and get explicit confirmation before doing anything with it
-  — e.g. "Just to confirm, that's [number], is that right?" — a wrong digit here means we call the
-  wrong person going forward, so never skip this confirmation. If they correct it, take the
-  correction as final — don't re-confirm a second time unless they seem unsure. Do not call
-  confirm_contact until you actually have both name and a confirmed-correct phone number.
+  Once you have a number, the very next thing out of your mouth — before anything else, before any
+  tool call, before a thank-you — MUST be reading it back and asking for confirmation: "Just to
+  confirm, that's [number], is that right?" This is a mandatory spoken step, not optional and not
+  something to skip just because the number sounded clear the first time. A real mistake seen on a
+  live call: right after hearing a valid number, Everly skipped straight to "Hold on a sec, thanks
+  so much for your help" — the read-back question was never spoken at all. Do not let that happen
+  again: the read-back is not implied by getting the number, it has to actually be spoken, every
+  single time, before doing anything else with it. A wrong digit here means we call the wrong
+  person going forward. If they correct it, take the correction as final — don't re-confirm a
+  second time unless they seem unsure. Do not call confirm_contact until you actually have both
+  name and a confirmed-correct phone number.
   If that new person is available on this same call, continue with them via "Once identity is
   confirmed" below. If they are NOT available on this call: once you have both name and phone, call
   confirm_contact, then say a brief thank-you ("Thanks so much for your help, I'll reach out to
