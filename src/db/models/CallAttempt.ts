@@ -141,9 +141,12 @@ const callAttemptSchema = new Schema(
 callAttemptSchema.index({ loadId: 1, outreachId: 1, attemptNumber: 1 }, { unique: true });
 
 // Backs contactMemory.ts's cross-load "known contact" lookup (filter by
-// carrierId, sort by startedAt desc, limited) — without this, MongoDB has
+// carrierId, sort by createdAt desc, limited) — without this, MongoDB has
 // to gather and sort every attempt this real carrier has ever had before
-// it can hand back just the most recent confirmed contact.
-callAttemptSchema.index({ carrierId: 1, startedAt: -1 });
+// it can hand back just the most recent confirmed contact. Sorted on
+// createdAt, not startedAt — startedAt can be legitimately backdated for
+// cadence/testing purposes (see cadence.ts), which would otherwise let an
+// older confirmation outrank a genuinely later one.
+callAttemptSchema.index({ carrierId: 1, createdAt: -1 });
 
 export const CallAttempt = model("CallAttempt", callAttemptSchema);

@@ -33,7 +33,13 @@ export async function getKnownContact(mdrCarrierId: number, excludeAttemptId?: u
     query._id = { $ne: excludeAttemptId };
   }
 
-  const attempt = await CallAttempt.findOne(query).sort({ startedAt: -1 }).select("confirmedContactName confirmedContactPhone").lean();
+  // Sorted by createdAt (Mongoose's own insertion timestamp), not startedAt —
+  // startedAt is set by dispatch.ts at dial time and can legitimately be
+  // backdated for cadence/testing purposes (see cadence.ts), which would
+  // otherwise make an older confirmation look "more recent" than a real
+  // later one. createdAt reflects true insertion order and is never touched
+  // by anything else in this codebase.
+  const attempt = await CallAttempt.findOne(query).sort({ createdAt: -1 }).select("confirmedContactName confirmedContactPhone").lean();
 
   if (!attempt?.confirmedContactName) return null;
   return {
