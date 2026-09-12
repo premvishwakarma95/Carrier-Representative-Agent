@@ -194,8 +194,10 @@ export const TOOLS = [
           phone: {
             type: "string",
             description:
-              "the contact's phone number or extension, only if they actually stated one on this call — omit " +
-              "otherwise, never invent one. Capture exactly the digits they said, in the order they said them — " +
+              "the contact's phone number, only if they actually stated one on this call — omit " +
+              "otherwise, never invent one. Do not ask about or capture an extension — a plain phone number " +
+              "only; MDR handles extensions on their own side. Capture exactly the digits they said, in the " +
+              "order they said them — " +
               "never add a country code (e.g. +1, +91) unless they actually spoke it themselves; do not guess or " +
               "normalize one on your own, even if it seems like the obvious default.",
           },
