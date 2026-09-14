@@ -267,12 +267,16 @@ export function submitCallFinalResult(payload: MdrCallFinalResultRequest): Promi
  * received 2026-08-27) plus CALL_DROPPED, added 2026-08-31 per explicit
  * instruction to cover a connected call the carrier hung up on before
  * reaching any conclusive outcome — confirmed on a real test call, MDR's
- * original 6 values had no honest equivalent for that case. Mapped from our
- * CallAttempt.status/callResult in callOutcome.ts's mapToMdrCallLogStatus,
- * which still returns null (skip the push entirely) for outcomes that
- * remain a poor fit even with CALL_DROPPED available (do_not_call, failed,
- * wrong_number) rather than force one of these 7 onto something that
- * doesn't fit.
+ * original 6 values had no honest equivalent for that case — and
+ * WRONG_CONTACT, added 2026-09-14 per explicit instruction to cover a call
+ * where whoever answered wasn't the drayage-pricing contact and named
+ * someone else not reachable on this call; previously that case fell
+ * through to CALL_DROPPED via applyCallOutcome's "connected" fallback,
+ * which was inaccurate. Mapped from our CallAttempt.status/callResult in
+ * callOutcome.ts's mapToMdrCallLogStatus, which still returns null (skip
+ * the push entirely) for outcomes that remain a poor fit even with these
+ * values available (do_not_call, failed, wrong_number) rather than force
+ * one of these onto something that doesn't fit.
  */
 export type MdrCallLogStatus =
   | "NO_ANSWER"
@@ -281,7 +285,8 @@ export type MdrCallLogStatus =
   | "EMAIL_REQUESTED"
   | "ACCEPTED"
   | "DECLINED"
-  | "CALL_DROPPED";
+  | "CALL_DROPPED"
+  | "WRONG_CONTACT";
 
 export interface MdrCallLogRequest {
   outreach_id: number;

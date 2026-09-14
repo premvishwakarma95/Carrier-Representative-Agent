@@ -221,6 +221,12 @@ async function confirmContact(params: any, { attempt }: CallContext) {
   // just an audit trail.
   attempt.confirmedContactName = params.name;
   if (params.phone) attempt.confirmedContactPhone = params.phone;
+  // contactOnThisCall === false means whoever answered isn't the
+  // drayage-pricing contact and the real one isn't reachable on this call —
+  // this call never actually reached the right person, so it reports to
+  // MDR's call-log as WRONG_CONTACT (see mapToMdrCallLogStatus) instead of
+  // falling through applyCallOutcome's "connected" fallback to CALL_DROPPED.
+  if (params.contactOnThisCall === false) attempt.callResult = "wrong_contact";
   await attempt.save();
 
   let mdrSync: "ok" | "failed" = "ok";

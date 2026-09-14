@@ -201,8 +201,17 @@ export const TOOLS = [
               "never add a country code (e.g. +1, +91) unless they actually spoke it themselves; do not guess or " +
               "normalize one on your own, even if it seems like the obvious default.",
           },
+          contactOnThisCall: {
+            type: "boolean",
+            description:
+              "true if this confirmed contact is the person you are actually speaking with right now on " +
+              "this call. false only when the name (and phone) belongs to someone else entirely who is NOT " +
+              "on this call — e.g. a colleague or manager named as the real pricing/dispatch contact. This " +
+              "determines whether the call gets reported to MDR as having reached the wrong contact, so " +
+              "answer it accurately every time.",
+          },
         },
-        required: ["name"],
+        required: ["name", "contactOnThisCall"],
       },
     },
     server: { url: ORCHESTRATION_WEBHOOK_URL },

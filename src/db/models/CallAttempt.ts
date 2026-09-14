@@ -63,6 +63,15 @@ const callAttemptSchema = new Schema(
         // EMAIL_REQUESTED call-log status accurately (see callOutcome.ts's
         // mapToMdrCallLogStatus).
         "email_requested",
+        // Set by confirm_contact when contactOnThisCall is false — the
+        // person who answered isn't who handles drayage pricing, and the
+        // real contact they named isn't reachable on this call. Distinct
+        // from wrong_number (the dialed phone number itself was wrong) —
+        // here the number was right, just not the right person. Without
+        // this, the call fell through applyCallOutcome's "connected"
+        // fallback and reported MDR's call-log as CALL_DROPPED instead of
+        // WRONG_CONTACT.
+        "wrong_contact",
       ],
     },
 
