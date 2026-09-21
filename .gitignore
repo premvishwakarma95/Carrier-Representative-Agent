@@ -2,3 +2,6 @@
 .env.local
 node_modules/
 *.log
+
+# Local-only server/credential notes
+*.local.md
