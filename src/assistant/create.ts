@@ -87,8 +87,15 @@ import { TOOLS, ORCHESTRATION_WEBHOOK_URL } from "./tools.js";
 // above the single 30s "Hello? Are you there?" hook above, so the nudge is
 // just a check-in with no consequence, and the actual hang-up threshold sits
 // well past a normal pause (checking a rate, etc.).
+// Dashboard label only — the persona's spoken name still comes from
+// prompt.ts. Lets each deployment (production, staging, a future second
+// server) show a distinct name in Vapi's dashboard instead of every
+// environment creating/updating an assistant all labeled identically
+// "Everly" — the same reasoning the sibling IRS-agent project already
+// applies with its own "Everly-(IRS)" label. Defaults to "Everly" so an
+// environment that hasn't set this yet behaves exactly as before.
 const assistantPayload = {
-  name: "Everly",
+  name: process.env.AGENT_NAME ?? "Everly",
   firstMessage: "",
   firstMessageMode: "assistant-waits-for-user",
   silenceTimeoutSeconds: 60,
