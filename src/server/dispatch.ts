@@ -291,21 +291,28 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
   }
 
   let scheduledFor;
+  // A carrier who agreed to a specific callback time (schedule_callback)
+  // overrides the normal cadence math entirely for the next attempt: call
+  // then, not at a computed 30min/1hr/2hr/next-business-morning offset —
+  // and, per the calling-window check below, unchecked against the window
+  // too. webhookHandlers.ts's scheduleCallback no longer validates this
+  // time against the window either (removed 2026-09-24, per explicit
+  // instruction) — the carrier naming their own availability is treated as
+  // pre-approved, end to end.
+  let isCallbackDriven = false;
   try {
     const lastAttempt = existingAttempts[existingAttempts.length - 1];
-    // A carrier who agreed to a specific callback time (schedule_callback,
-    // already validated against the calling window when it was captured —
-    // see webhookHandlers.ts) overrides the normal cadence math entirely for
-    // the next attempt: call then, not at a computed 30min/1hr/2hr/next-
-    // business-morning offset.
-    scheduledFor = lastAttempt?.callbackAt
-      ? lastAttempt.callbackAt
-      : computeAttemptSchedule({
-          attemptNumber: nextAttemptNumber,
-          timezone: fresh.carrier.carrier_timezone,
-          emailSentAt,
-          previousAttemptAt: lastAttempt?.startedAt ?? lastAttempt?.createdAt,
-        });
+    if (lastAttempt?.callbackAt) {
+      scheduledFor = lastAttempt.callbackAt;
+      isCallbackDriven = true;
+    } else {
+      scheduledFor = computeAttemptSchedule({
+        attemptNumber: nextAttemptNumber,
+        timezone: fresh.carrier.carrier_timezone,
+        emailSentAt,
+        previousAttemptAt: lastAttempt?.startedAt ?? lastAttempt?.createdAt,
+      });
+    }
   } catch (err) {
     console.error(
       `dispatch/run: failed to compute attempt schedule (load ${load.id}, outreach_id ${carrier.outreach_id}, attempt ${nextAttemptNumber}):`,
@@ -333,7 +340,11 @@ async function processCarrier(load: any, carrier: any, results: Result[], dryRun
     return false;
   }
 
-  if (!isWithinCallingWindow(fresh.carrier.carrier_timezone, now)) {
+  // Skipped entirely for a callback-driven attempt — the carrier named this
+  // exact time themselves (see scheduledFor above and webhookHandlers.ts's
+  // scheduleCallback), so it's never re-gated by the window here. Every
+  // other, cadence-computed attempt still goes through this check as normal.
+  if (!isCallbackDriven && !isWithinCallingWindow(fresh.carrier.carrier_timezone, now)) {
     results.push({
       loadId: load.id,
       outreachId: carrier.outreach_id,
